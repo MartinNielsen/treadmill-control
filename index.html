@@ -473,7 +473,11 @@
         log(`Initial speed target set to ${initialSpeed.toFixed(1)} km/h`);
 
         // Poll for speed to reach 1.0 before setting target speed
-        speedPollInterval = setInterval(() => {
+        speedPollInterval = setInterval(async () => {
+          // Actively read the speed
+          const dv = await chData.readValue();
+          onTreadmillData({ target: { value: dv } });
+
           if (currentSpeedKph >= 1.0) {
             clearInterval(speedPollInterval);
             const value = Math.round(targetKph * 100);
