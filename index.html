@@ -248,7 +248,7 @@
       let targetKph = 0.0; // our local target speed in km/h
       let minKph = 0, maxKph = 20, stepKph = 0.1; // defaults until we read Supported Speed Range
       let currentSpeedKph = 0.0;
-      let speedPollInterval;
+      let rampUpTimeout;
 
       // Load target speed from localStorage
       let savedTargetSpeed = localStorage.getItem('targetSpeed');
@@ -460,44 +460,40 @@
       }
 
       async function start() {
+        const RAMP_UP_DELAY_MS = 10000; // 10 seconds
+
         console.log('start function called');
         try {
             await writeControl(OP_START_OR_RESUME);
             log('Start command sent');
-            console.log('Start command sent successfully.');
     
             const initialSpeed = 1.0;
             const value = Math.round(initialSpeed * 100);
-            console.log(`Setting initial target speed to ${initialSpeed.toFixed(1)} km/h (raw value: ${value})`);
             await writeControl(OP_SET_TARGET_SPEED, value);
-            log(`Initial speed target set to ${initialSpeed.toFixed(1)} km/h`);
+            log(`Initial speed target set to 1.0 km/h. Waiting ${RAMP_UP_DELAY_MS / 1000}s for ramp-up...`);
+
+            // Wait for the treadmill to ramp up before setting the final target speed
+            rampUpTimeout = setTimeout(async () => {
+                try {
+                    const targetValue = Math.round(targetKph * 100);
+                    console.log(`Ramp-up delay complete. Setting target speed to ${targetKph.toFixed(1)} km/h`);
+                    await writeControl(OP_SET_TARGET_SPEED, targetValue);
+                    log(`Target speed set to ${targetKph.toFixed(1)} km/h`);
+                } catch (e) {
+                    console.error('Error setting target speed after delay:', e);
+                    log(e.message, 'error');
+                }
+            }, RAMP_UP_DELAY_MS);
+
         } catch (e) {
             console.error('Failed to send start commands:', e);
             log(e.message, 'error');
-            return; // Don't start polling if initial commands fail
         }
-
-        // Poll for speed to reach 1.0 before setting target speed
-        speedPollInterval = setInterval(async () => { // make it async to use await
-          // The currentSpeedKph variable is updated by the onTreadmillData notification handler
-          if (currentSpeedKph >= 1.0) {
-            try {
-                clearInterval(speedPollInterval);
-                const value = Math.round(targetKph * 100);
-                console.log(`Setting target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
-                await writeControl(OP_SET_TARGET_SPEED, value);
-                log(`Target speed set to ${targetKph.toFixed(1)} km/h`);
-            } catch (e) {
-                console.error('Error setting target speed:', e);
-                log(e.message, 'error');
-            }
-          }
-        }, 500);
       }
 
       async function stop() {
         console.log('stop function called');
-        clearInterval(speedPollInterval);
+        clearTimeout(rampUpTimeout); // Clear the ramp-up timeout
         await writeControl(OP_STOP_OR_PAUSE);
         log('Stop command sent');
         console.log('Stop command sent successfully.');
