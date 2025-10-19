@@ -431,9 +431,18 @@
 
       async function start() {
         console.log('start function called');
+        // Per user feedback, some treadmills need a "start" command followed by an immediate speed command.
         await writeControl(OP_START_OR_RESUME);
         log('Start command sent');
         console.log('Start command sent successfully.');
+
+        // Set speed to the minimum allowed speed to kick things off.
+        targetKph = minKph > 0 ? minKph : 1.0; // Use minKph, but fallback to 1.0 if min is 0
+        updateTargetDisplay();
+        const value = Math.round(targetKph * 100);
+        console.log(`Setting initial target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
+        await writeControl(OP_SET_TARGET_SPEED, value);
+        log(`Initial speed target set to ${targetKph.toFixed(1)} km/h`);
       }
 
       async function stop() {
