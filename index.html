@@ -3,43 +3,401 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello World - Treadmill Control</title>
+    <title>Treadmill Control - FTMS Bluetooth Controller</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
+            padding: 2rem;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
+            box-sizing: border-box;
         }
         .container {
-            text-align: center;
+            max-width: 600px;
+            width: 100%;
             padding: 2rem;
             background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
+            border-radius: 20px;
             box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
             backdrop-filter: blur(4px);
             border: 1px solid rgba(255, 255, 255, 0.18);
         }
         h1 {
-            font-size: 3rem;
-            margin: 0;
+            font-size: 2.5rem;
+            margin: 0 0 0.5rem 0;
+            text-align: center;
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
         }
-        p {
-            font-size: 1.2rem;
-            margin-top: 1rem;
+        .subtitle {
+            text-align: center;
+            font-size: 1rem;
+            margin-bottom: 2rem;
+            opacity: 0.8;
+        }
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.7;
+            margin-bottom: 0.5rem;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+        .stat-unit {
+            font-size: 1rem;
+            opacity: 0.7;
+        }
+        button {
+            padding: 0.8rem 1.2rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(4px);
+        }
+        button:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .status-badge {
+            padding: 0.4rem 0.8rem;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .status-ok {
+            background: rgba(5, 150, 105, 0.3);
+            border-color: rgba(5, 150, 105, 0.5);
+        }
+        .status-warn {
+            background: rgba(180, 83, 9, 0.3);
+            border-color: rgba(180, 83, 9, 0.5);
+        }
+        .status-error {
+            background: rgba(185, 28, 28, 0.3);
+            border-color: rgba(185, 28, 28, 0.5);
+        }
+        .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+        }
+        .speed-controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .target-display {
+            margin-left: 1rem;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        .log {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            height: 150px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .notes {
+            margin-top: 1.5rem;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        .notes ul {
+            padding-left: 1.2rem;
+        }
+        .notes li {
+            margin-bottom: 0.5rem;
+        }
+        .mono {
+            font-family: 'Courier New', monospace;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Hello World!</h1>
-        <p>Welcome to Treadmill Control</p>
-        <p>Send Bluetooth commands to treadmill from web page</p>
+        <h1>Treadmill Control</h1>
+        <p class="subtitle">Connect to a Bluetooth treadmill that implements the Fitness Machine Service (FTMS, UUID <span class="mono">0x1826</span>). You can Start/Stop the belt and adjust speed ±0.5 km/h.</p>
+        
+        <div class="row">
+            <button id="btnConnect">🔗 Connect Treadmill</button>
+            <span id="status" class="status-badge">idle</span>
+        </div>
+
+        <div class="grid">
+            <div class="stat-card">
+                <div class="stat-label">Current Speed</div>
+                <div class="stat-value">
+                    <span id="speed">0.0</span> 
+                    <span class="stat-unit">km/h</span>
+                </div>
+                <div class="stat-label">Device: <span id="deviceName">—</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Allowed Range</div>
+                <div class="stat-value" style="font-size: 1.5rem;">
+                    <span id="range">—</span>
+                </div>
+                <div class="stat-label">Step: <span id="step">—</span></div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="btnStart" disabled>▶️ Start</button>
+            <button id="btnStop" disabled>⏸ Stop</button>
+            <div class="speed-controls">
+                <button id="btnMinus" disabled">➖ −0.5</button>
+                <button id="btnPlus" disabled">➕ +0.5</button>
+                <span class="target-display">Target: <span id="target">0.0</span> km/h</span>
+            </div>
+        </div>
+
+        <div class="log" id="log"></div>
+
+        <div class="notes">
+            <strong>Notes:</strong>
+            <ul>
+                <li>Most FTMS devices require a <em>Request Control</em> before you can change targets. This app sends it on connect.</li>
+                <li>Speed values use 0.01 km/h units on the wire. We show km/h in the UI.</li>
+                <li>This app must be served over <strong>HTTPS</strong> and run in a supported browser (e.g., Chrome/Edge). Some platforms disable Web Bluetooth.</li>
+            </ul>
+        </div>
     </div>
+
+    <script>
+    (async () => {
+      // ======= Assigned Numbers (16-bit UUIDs) =======
+      const FTMS_SERVICE                = 0x1826; // Fitness Machine Service
+      const CH_FITNESS_MACHINE_FEATURE  = 0x2ACC; // bitfields for features
+      const CH_TREADMILL_DATA           = 0x2ACD; // notifications with speed, etc.
+      const CH_SUPPORTED_SPEED_RANGE    = 0x2AD4; // min, max, increment (0.01 km/h)
+      const CH_FITNESS_MACHINE_CONTROL  = 0x2AD9; // write + indicate responses
+
+      // Fitness Machine Control Point opcodes (per spec)
+      const OP_REQUEST_CONTROL = 0x00;
+      const OP_RESET           = 0x01;
+      const OP_SET_TARGET_SPEED= 0x02; // parameter: uint16 of 0.01 km/h
+      const OP_START_OR_RESUME = 0x07;
+      const OP_STOP_OR_PAUSE   = 0x08;
+
+      const ui = (id) => document.getElementById(id);
+      const log = (m, level="") => {
+        const el = ui('log');
+        el.textContent += m + "\n";
+        el.scrollTop = el.scrollHeight;
+        ui('status').textContent = level || 'connected';
+        ui('status').className = 'status-badge ' + (level === 'error' ? 'status-error' : level === 'warn' ? 'status-warn' : 'status-ok');
+      };
+
+      let device, server, ftms;
+      let chCtrl, chData, chSpeedRange;
+      let targetKph = 0.0; // our local target speed in km/h
+      let minKph = 0, maxKph = 20, stepKph = 0.1; // defaults until we read Supported Speed Range
+
+      function updateTargetDisplay() {
+        ui('target').textContent = targetKph.toFixed(1);
+      }
+
+      function clampTarget() {
+        targetKph = Math.max(minKph, Math.min(maxKph, targetKph));
+        // snap to step increment
+        const steps = Math.round((targetKph - minKph) / stepKph);
+        targetKph = +(minKph + steps * stepKph).toFixed(1);
+        updateTargetDisplay();
+      }
+
+      async function connect() {
+        if (!('bluetooth' in navigator)) {
+          alert('Web Bluetooth not supported in this browser. Try Chrome/Edge on desktop or Android, over HTTPS.');
+          return;
+        }
+
+        log('Requesting treadmill with FTMS (0x1826)…');
+        device = await navigator.bluetooth.requestDevice({
+          filters: [
+            // Filter by FTMS service; the chooser should only show FTMS devices (e.g., treadmills)
+            { services: [FTMS_SERVICE] },
+            // Optional: narrow further by advertised name prefix if your brand is known
+            // { namePrefix: 'NoblePro' },
+          ],
+          optionalServices: [FTMS_SERVICE]
+        });
+
+        ui('deviceName').textContent = device.name || '(unnamed)';
+
+        device.addEventListener('gattserverdisconnected', () => {
+          log('Disconnected');
+          setControlsEnabled(false);
+          ui('status').textContent = 'disconnected';
+          ui('status').className = 'status-badge status-error';
+        });
+
+        server = await device.gatt.connect();
+        ftms = await server.getPrimaryService(FTMS_SERVICE);
+
+        // Characteristics we use
+        chCtrl       = await ftms.getCharacteristic(CH_FITNESS_MACHINE_CONTROL);
+        chData       = await ftms.getCharacteristic(CH_TREADMILL_DATA);
+        chSpeedRange = await ftms.getCharacteristic(CH_SUPPORTED_SPEED_RANGE).catch(() => null);
+
+        // Listen for control point responses (indications)
+        try {
+          await chCtrl.startNotifications();
+          chCtrl.addEventListener('characteristicvaluechanged', onControlPointIndication);
+        } catch (e) {
+          log('Could not enable Control Point indications: ' + e.message, 'warn');
+        }
+
+        // Request control (mandatory before sending control commands on many machines)
+        await writeControl(OP_REQUEST_CONTROL);
+
+        // Subscribe to treadmill data for live speed
+        await chData.startNotifications();
+        chData.addEventListener('characteristicvaluechanged', onTreadmillData);
+
+        // Read supported speed range if available
+        if (chSpeedRange) {
+          const dv = await chSpeedRange.readValue();
+          // All are uint16 little-endian in 0.01 km/h
+          minKph  = dv.getUint16(0, true) / 100;
+          maxKph  = dv.getUint16(2, true) / 100;
+          stepKph = dv.getUint16(4, true) / 100;
+          ui('range').textContent = `${minKph.toFixed(1)}–${maxKph.toFixed(1)} km/h`;
+          ui('step').textContent  = `${stepKph.toFixed(1)} km/h`;
+          targetKph = Math.max(minKph, Math.min(5, maxKph));
+          updateTargetDisplay();
+        } else {
+          ui('range').textContent = 'unknown';
+          ui('step').textContent  = '—';
+        }
+
+        setControlsEnabled(true);
+        log('Connected successfully');
+      }
+
+      function setControlsEnabled(enabled) {
+        ui('btnStart').disabled = !enabled;
+        ui('btnStop').disabled  = !enabled;
+        ui('btnPlus').disabled  = !enabled;
+        ui('btnMinus').disabled = !enabled;
+      }
+
+      function onTreadmillData(event) {
+        const dv = event.target.value; // DataView
+        // Per spec, first 2 bytes are Flags. Instantaneous Speed presence is indicated by a flag.
+        const flags = dv.getUint16(0, true);
+        // In FTMS, when present, Instantaneous Speed comes right after flags as uint16 in 0.01 km/h.
+        // Not all devices are perfectly spec-compliant; this covers the common case.
+        let offset = 2;
+        const INSTANT_SPEED_PRESENT = (flags & 0x0001) !== 0; // spec: bit 0
+        if (INSTANT_SPEED_PRESENT) {
+          const speedKph = dv.getUint16(offset, true) / 100; offset += 2;
+          ui('speed').textContent = speedKph.toFixed(1);
+        }
+      }
+
+      function onControlPointIndication(event) {
+        const dv = event.target.value;
+        // Response format: Op Code (0x80), Request Op Code, Result Code, [optional parameter]
+        const op   = dv.getUint8(0);
+        const req  = dv.getUint8(1);
+        const rc   = dv.getUint8(2);
+        log(`CP response op=0x${op.toString(16)} req=${req} rc=${rc}`);
+      }
+
+      async function writeControl(opcode, parameterUint16 /* optional */) {
+        // Control Point writes are variable length. Parameters are Little Endian per spec.
+        let payload;
+        if (typeof parameterUint16 === 'number') {
+          payload = new Uint8Array(3);
+          payload[0] = opcode;
+          payload[1] = parameterUint16 & 0xff;
+          payload[2] = (parameterUint16 >> 8) & 0xff;
+        } else {
+          payload = new Uint8Array([opcode]);
+        }
+        await chCtrl.writeValueWithoutResponse(payload).catch(async () => {
+          // Some devices require Write With Response; try the other method.
+          await chCtrl.writeValue(payload);
+        });
+      }
+
+      async function start() {
+        await writeControl(OP_START_OR_RESUME);
+        log('Start command sent');
+      }
+
+      async function stop() {
+        await writeControl(OP_STOP_OR_PAUSE);
+        log('Stop command sent');
+      }
+
+      async function bump(delta) {
+        targetKph = +(targetKph + delta).toFixed(1);
+        clampTarget();
+        // Convert km/h to 0.01 km/h integer per spec
+        const value = Math.round(targetKph * 100);
+        await writeControl(OP_SET_TARGET_SPEED, value);
+        log(`Speed target set to ${targetKph.toFixed(1)} km/h`);
+      }
+
+      // ===== wire up UI =====
+      ui('btnConnect').addEventListener('click', () => connect().catch(e => log(e.message, 'error')));
+      ui('btnStart').addEventListener('click', () => start().catch(e => log(e.message, 'error')));
+      ui('btnStop').addEventListener('click',  () => stop().catch(e => log(e.message, 'error')));
+      ui('btnPlus').addEventListener('click',  () => bump(+0.5).catch(e => log(e.message, 'error')));
+      ui('btnMinus').addEventListener('click', () => bump(-0.5).catch(e => log(e.message, 'error')));
+
+      // Initialize display
+      updateTargetDisplay();
+    })();
+    </script>
 </body>
 </html>

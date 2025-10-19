@@ -1,0 +1,6 @@
+# Ignore GitHub specific files
+.github/
+
+# Ignore SSL certificate files
+cert.pem
+key.pem
