@@ -365,20 +365,27 @@
       function onTreadmillData(event) {
         const dv = event.target.value; // DataView
         console.log('Received Treadmill Data notification:', dv);
-        // Per spec, first 2 bytes are Flags. Instantaneous Speed presence is indicated by a flag.
         const flags = dv.getUint16(0, true);
         console.log(`Treadmill Data flags: 0x${flags.toString(16).padStart(4, '0')}`);
-        // In FTMS, when present, Instantaneous Speed comes right after flags as uint16 in 0.01 km/h.
-        // Not all devices are perfectly spec-compliant; this covers the common case.
+        
         let offset = 2;
-        const INSTANT_SPEED_PRESENT = (flags & 0x0001) !== 0; // spec: bit 0
-        console.log(`Instantaneous Speed present: ${INSTANT_SPEED_PRESENT}`);
-        if (INSTANT_SPEED_PRESENT) {
-          const speedRaw = dv.getUint16(offset, true);
-          const speedKph = speedRaw / 100;
-          offset += 2;
-          console.log(`Instantaneous Speed raw=${speedRaw}, kph=${speedKph}`);
-          ui('speed').textContent = speedKph.toFixed(1);
+        // This is a non-standard but common way some treadmills (like yours) send speed.
+        // The speed is often the first field after the flags, even if the "Instantaneous Speed" flag (bit 0) isn't set.
+        // Let's try to read it regardless of the flag.
+        if (dv.byteLength >= 4) {
+            const speedRaw = dv.getUint16(offset, true);
+            const speedKph = speedRaw / 100;
+            offset += 2;
+            
+            // A sanity check: if speed is an absurdly high number, it's probably not speed.
+            if (speedKph < 100) { 
+                console.log(`Instantaneous Speed (heuristic) raw=${speedRaw}, kph=${speedKph}`);
+                ui('speed').textContent = speedKph.toFixed(1);
+            } else {
+                console.log(`Heuristic speed reading was too high (${speedKph}), ignoring.`);
+            }
+        } else {
+            console.log('Treadmill data packet is too short to contain speed.');
         }
       }
 
