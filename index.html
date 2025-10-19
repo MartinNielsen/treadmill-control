@@ -191,11 +191,16 @@
         </div>
 
         <div class="controls">
+            <div class="row" style="justify-content: center;">
+                <label for="targetSpeedInput">Target Speed (km/h):</label>
+                <input type="number" id="targetSpeedInput" min="0" max="25" step="0.1" style="width: 80px; padding: 0.5rem; border-radius: 8px; border: 1px solid #ccc;"/>
+                <button id="btnSetTargetSpeed" disabled>Set</button>
+            </div>
             <button id="btnStart" disabled>▶️ Start</button>
             <button id="btnStop" disabled>⏸ Stop</button>
             <div class="speed-controls">
-                <button id="btnMinus" disabled">➖ −0.5</button>
-                <button id="btnPlus" disabled">➕ +0.5</button>
+                <button id="btnMinus" disabled>➖ −0.5</button>
+                <button id="btnPlus" disabled>➕ +0.5</button>
                 <span class="target-display">Target: <span id="target">0.0</span> km/h</span>
             </div>
         </div>
@@ -242,6 +247,15 @@
       let chCtrl, chData, chSpeedRange;
       let targetKph = 0.0; // our local target speed in km/h
       let minKph = 0, maxKph = 20, stepKph = 0.1; // defaults until we read Supported Speed Range
+      let currentSpeedKph = 0.0;
+      let speedPollInterval;
+
+      // Load target speed from localStorage
+      let savedTargetSpeed = localStorage.getItem('targetSpeed');
+      if (savedTargetSpeed) {
+        targetKph = parseFloat(savedTargetSpeed);
+      }
+      ui('targetSpeedInput').value = targetKph.toFixed(1);
 
       function updateTargetDisplay() {
         console.log('updateTargetDisplay called');
@@ -370,6 +384,8 @@
         ui('btnStop').disabled  = !enabled;
         ui('btnPlus').disabled  = !enabled;
         ui('btnMinus').disabled = !enabled;
+        ui('btnSetTargetSpeed').disabled = !enabled;
+        ui('targetSpeedInput').disabled = !enabled;
         ui('btnConnect').hidden = enabled;
         ui('btnDisconnect').hidden = !enabled;
       }
@@ -393,6 +409,7 @@
             if (speedKph < 100) { 
                 console.log(`Instantaneous Speed (heuristic) raw=${speedRaw}, kph=${speedKph}`);
                 ui('speed').textContent = speedKph.toFixed(1);
+                currentSpeedKph = speedKph;
             } else {
                 console.log(`Heuristic speed reading was too high (${speedKph}), ignoring.`);
             }
@@ -444,22 +461,32 @@
 
       async function start() {
         console.log('start function called');
-        // Per user feedback, some treadmills need a "start" command followed by an immediate speed command.
         await writeControl(OP_START_OR_RESUME);
         log('Start command sent');
         console.log('Start command sent successfully.');
 
-        // Set speed to the minimum allowed speed to kick things off.
-        targetKph = minKph > 0 ? minKph : 1.0; // Use minKph, but fallback to 1.0 if min is 0
-        updateTargetDisplay();
-        const value = Math.round(targetKph * 100);
-        console.log(`Setting initial target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
+        // Set initial speed to 1.0 km/h
+        const initialSpeed = 1.0;
+        const value = Math.round(initialSpeed * 100);
+        console.log(`Setting initial target speed to ${initialSpeed.toFixed(1)} km/h (raw value: ${value})`);
         await writeControl(OP_SET_TARGET_SPEED, value);
-        log(`Initial speed target set to ${targetKph.toFixed(1)} km/h`);
+        log(`Initial speed target set to ${initialSpeed.toFixed(1)} km/h`);
+
+        // Poll for speed to reach 1.0 before setting target speed
+        speedPollInterval = setInterval(() => {
+          if (currentSpeedKph >= 1.0) {
+            clearInterval(speedPollInterval);
+            const value = Math.round(targetKph * 100);
+            console.log(`Setting target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
+            writeControl(OP_SET_TARGET_SPEED, value);
+            log(`Target speed set to ${targetKph.toFixed(1)} km/h`);
+          }
+        }, 500);
       }
 
       async function stop() {
         console.log('stop function called');
+        clearInterval(speedPollInterval);
         await writeControl(OP_STOP_OR_PAUSE);
         log('Stop command sent');
         console.log('Stop command sent successfully.');
@@ -469,6 +496,8 @@
         console.log(`bump function called with delta: ${delta}`);
         targetKph = +(targetKph + delta).toFixed(1);
         clampTarget();
+        localStorage.setItem('targetSpeed', targetKph);
+        ui('targetSpeedInput').value = targetKph.toFixed(1);
         // Convert km/h to 0.01 km/h integer per spec
         const value = Math.round(targetKph * 100);
         console.log(`Setting target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
@@ -516,6 +545,18 @@
             console.error('Bump -0.5 failed:', e);
             log(e.message, 'error');
         });
+      });
+
+      ui('btnSetTargetSpeed').addEventListener('click', () => {
+        console.log('Set Target Speed button clicked');
+        const speed = parseFloat(ui('targetSpeedInput').value);
+        if (!isNaN(speed)) {
+          targetKph = speed;
+          clampTarget();
+          localStorage.setItem('targetSpeed', targetKph);
+          ui('targetSpeedInput').value = targetKph.toFixed(1);
+          log(`Target speed set to ${targetKph.toFixed(1)} km/h`);
+        }
       });
 
       // Initialize display
