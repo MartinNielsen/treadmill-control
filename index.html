@@ -168,6 +168,7 @@
         
         <div class="row">
             <button id="btnConnect">🔗 Connect Treadmill</button>
+            <button id="btnDisconnect" hidden>🔌 Disconnect</button>
             <span id="status" class="status-badge">idle</span>
         </div>
 
@@ -280,13 +281,7 @@
 
         ui('deviceName').textContent = device.name || '(unnamed)';
 
-        device.addEventListener('gattserverdisconnected', () => {
-          console.warn('GATT server disconnected.');
-          log('Disconnected');
-          setControlsEnabled(false);
-          ui('status').textContent = 'disconnected';
-          ui('status').className = 'status-badge status-error';
-        });
+        device.addEventListener('gattserverdisconnected', onDisconnected);
 
         console.log('Connecting to GATT server...');
         server = await device.gatt.connect();
@@ -354,12 +349,29 @@
         console.log('Connection process complete.');
       }
 
+      function disconnect() {
+        if (device && device.gatt.connected) {
+          log('Disconnecting...');
+          device.gatt.disconnect();
+        }
+      }
+
+      function onDisconnected() {
+        console.warn('GATT server disconnected.');
+        log('Disconnected');
+        setControlsEnabled(false);
+        ui('status').textContent = 'disconnected';
+        ui('status').className = 'status-badge status-error';
+      }
+
       function setControlsEnabled(enabled) {
         console.log(`Setting controls enabled state to: ${enabled}`);
         ui('btnStart').disabled = !enabled;
         ui('btnStop').disabled  = !enabled;
         ui('btnPlus').disabled  = !enabled;
         ui('btnMinus').disabled = !enabled;
+        ui('btnConnect').hidden = enabled;
+        ui('btnDisconnect').hidden = !enabled;
       }
 
       function onTreadmillData(event) {
@@ -471,6 +483,10 @@
             console.error('Connection failed:', e);
             log(e.message, 'error');
         });
+      });
+      ui('btnDisconnect').addEventListener('click', () => {
+        console.log('Disconnect button clicked');
+        disconnect();
       });
       ui('btnStart').addEventListener('click', () => {
         console.log('Start button clicked');
