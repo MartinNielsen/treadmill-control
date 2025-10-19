@@ -426,16 +426,17 @@
         }
         console.log('Writing payload to control characteristic:', payload);
         try {
-            await chCtrl.writeValueWithoutResponse(payload);
-            console.log('writeValueWithoutResponse successful.');
-        } catch(e) {
-          console.warn('writeValueWithoutResponse failed, trying writeValue:', e);
-          // Some devices require Write With Response; try the other method.
-          try {
+            // Per user feedback, the device expects a "request" (Write With Response).
             await chCtrl.writeValue(payload);
-            console.log('writeValue successful.');
+            console.log('writeValue (request) successful.');
+        } catch(e) {
+          console.warn('writeValue (request) failed, trying writeValueWithoutResponse (command):', e);
+          // As a fallback, try the other method.
+          try {
+            await chCtrl.writeValueWithoutResponse(payload);
+            console.log('writeValueWithoutResponse (command) successful.');
           } catch (e2) {
-            console.error('Both writeValueWithoutResponse and writeValue failed:', e2);
+            console.error('Both writeValue and writeValueWithoutResponse failed:', e2);
             throw e2; // re-throw the error to be caught by the caller
           }
         }
