@@ -461,29 +461,36 @@
 
       async function start() {
         console.log('start function called');
-        await writeControl(OP_START_OR_RESUME);
-        log('Start command sent');
-        console.log('Start command sent successfully.');
-
-        // Set initial speed to 1.0 km/h
-        const initialSpeed = 1.0;
-        const value = Math.round(initialSpeed * 100);
-        console.log(`Setting initial target speed to ${initialSpeed.toFixed(1)} km/h (raw value: ${value})`);
-        await writeControl(OP_SET_TARGET_SPEED, value);
-        log(`Initial speed target set to ${initialSpeed.toFixed(1)} km/h`);
+        try {
+            await writeControl(OP_START_OR_RESUME);
+            log('Start command sent');
+            console.log('Start command sent successfully.');
+    
+            const initialSpeed = 1.0;
+            const value = Math.round(initialSpeed * 100);
+            console.log(`Setting initial target speed to ${initialSpeed.toFixed(1)} km/h (raw value: ${value})`);
+            await writeControl(OP_SET_TARGET_SPEED, value);
+            log(`Initial speed target set to ${initialSpeed.toFixed(1)} km/h`);
+        } catch (e) {
+            console.error('Failed to send start commands:', e);
+            log(e.message, 'error');
+            return; // Don't start polling if initial commands fail
+        }
 
         // Poll for speed to reach 1.0 before setting target speed
-        speedPollInterval = setInterval(async () => {
-          // Actively read the speed
-          const dv = await chData.readValue();
-          onTreadmillData({ target: { value: dv } });
-
+        speedPollInterval = setInterval(async () => { // make it async to use await
+          // The currentSpeedKph variable is updated by the onTreadmillData notification handler
           if (currentSpeedKph >= 1.0) {
-            clearInterval(speedPollInterval);
-            const value = Math.round(targetKph * 100);
-            console.log(`Setting target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
-            writeControl(OP_SET_TARGET_SPEED, value);
-            log(`Target speed set to ${targetKph.toFixed(1)} km/h`);
+            try {
+                clearInterval(speedPollInterval);
+                const value = Math.round(targetKph * 100);
+                console.log(`Setting target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
+                await writeControl(OP_SET_TARGET_SPEED, value);
+                log(`Target speed set to ${targetKph.toFixed(1)} km/h`);
+            } catch (e) {
+                console.error('Error setting target speed:', e);
+                log(e.message, 'error');
+            }
           }
         }, 500);
       }
