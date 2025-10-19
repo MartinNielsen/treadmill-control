@@ -182,6 +182,17 @@
                 <div class="stat-label">Device: <span id="deviceName">—</span></div>
             </div>
             <div class="stat-card">
+                <div class="stat-label">Target Speed</div>
+                <div class="stat-value">
+                    <span id="target">0.0</span> 
+                    <span class="stat-unit">km/h</span>
+                </div>
+                <div class="speed-controls" style="margin-top: 1rem; justify-content: center; display: flex; gap: 0.5rem;">
+                    <button id="btnMinus" disabled>➖ −0.5</button>
+                    <button id="btnPlus" disabled>➕ +0.5</button>
+                </div>
+            </div>
+            <div class="stat-card">
                 <div class="stat-label">Allowed Range</div>
                 <div class="stat-value" style="font-size: 1.5rem;">
                     <span id="range">—</span>
@@ -191,18 +202,8 @@
         </div>
 
         <div class="controls">
-            <div class="row" style="justify-content: center;">
-                <label for="targetSpeedInput">Target Speed (km/h):</label>
-                <input type="number" id="targetSpeedInput" min="0" max="25" step="0.1" style="width: 80px; padding: 0.5rem; border-radius: 8px; border: 1px solid #ccc;"/>
-                <button id="btnSetTargetSpeed" disabled>Set</button>
-            </div>
             <button id="btnStart" disabled>▶️ Start</button>
             <button id="btnStop" disabled>⏸ Stop</button>
-            <div class="speed-controls">
-                <button id="btnMinus" disabled>➖ −0.5</button>
-                <button id="btnPlus" disabled>➕ +0.5</button>
-                <span class="target-display">Target: <span id="target">0.0</span> km/h</span>
-            </div>
         </div>
 
         <div class="log" id="log"></div>
@@ -247,7 +248,6 @@
       if (savedTargetSpeed) {
         targetKph = parseFloat(savedTargetSpeed);
       }
-      ui('targetSpeedInput').value = targetKph.toFixed(1);
 
       function updateTargetDisplay() {
         console.log('updateTargetDisplay called');
@@ -376,8 +376,6 @@
         ui('btnStop').disabled  = !enabled;
         ui('btnPlus').disabled  = !enabled;
         ui('btnMinus').disabled = !enabled;
-        ui('btnSetTargetSpeed').disabled = !enabled;
-        ui('targetSpeedInput').disabled = !enabled;
         ui('btnConnect').hidden = enabled;
         ui('btnDisconnect').hidden = !enabled;
       }
@@ -496,7 +494,6 @@
         targetKph = +(targetKph + delta).toFixed(1);
         clampTarget();
         localStorage.setItem('targetSpeed', targetKph);
-        ui('targetSpeedInput').value = targetKph.toFixed(1);
         // Convert km/h to 0.01 km/h integer per spec
         const value = Math.round(targetKph * 100);
         console.log(`Setting target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
@@ -544,18 +541,6 @@
             console.error('Bump -0.5 failed:', e);
             log(e.message, 'error');
         });
-      });
-
-      ui('btnSetTargetSpeed').addEventListener('click', () => {
-        console.log('Set Target Speed button clicked');
-        const speed = parseFloat(ui('targetSpeedInput').value);
-        if (!isNaN(speed)) {
-          targetKph = speed;
-          clampTarget();
-          localStorage.setItem('targetSpeed', targetKph);
-          ui('targetSpeedInput').value = targetKph.toFixed(1);
-          log(`Target speed set to ${targetKph.toFixed(1)} km/h`);
-        }
       });
 
       // Initialize display
