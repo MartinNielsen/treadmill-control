@@ -229,6 +229,7 @@
 
       const ui = (id) => document.getElementById(id);
       const log = (m, level="") => {
+        console.log(`[LOG] ${level.toUpperCase()}: ${m}`);
         const el = ui('log');
         el.textContent += m + "\n";
         el.scrollTop = el.scrollHeight;
@@ -242,24 +243,30 @@
       let minKph = 0, maxKph = 20, stepKph = 0.1; // defaults until we read Supported Speed Range
 
       function updateTargetDisplay() {
+        console.log('updateTargetDisplay called');
         ui('target').textContent = targetKph.toFixed(1);
       }
 
       function clampTarget() {
+        console.log(`clampTarget called. Initial target: ${targetKph} km/h`);
         targetKph = Math.max(minKph, Math.min(maxKph, targetKph));
         // snap to step increment
         const steps = Math.round((targetKph - minKph) / stepKph);
         targetKph = +(minKph + steps * stepKph).toFixed(1);
+        console.log(`Clamped and snapped target: ${targetKph} km/h`);
         updateTargetDisplay();
       }
 
       async function connect() {
+        console.log('connect function started');
         if (!('bluetooth' in navigator)) {
+          console.error('Web Bluetooth not supported.');
           alert('Web Bluetooth not supported in this browser. Try Chrome/Edge on desktop or Android, over HTTPS.');
           return;
         }
 
         log('Requesting treadmill with FTMS (0x1826)…');
+        console.log('Requesting Bluetooth device...');
         device = await navigator.bluetooth.requestDevice({
           filters: [
             // Filter by FTMS service; the chooser should only show FTMS devices (e.g., treadmills)
@@ -269,60 +276,86 @@
           ],
           optionalServices: [FTMS_SERVICE]
         });
+        console.log('Device selected:', device);
 
         ui('deviceName').textContent = device.name || '(unnamed)';
 
         device.addEventListener('gattserverdisconnected', () => {
+          console.warn('GATT server disconnected.');
           log('Disconnected');
           setControlsEnabled(false);
           ui('status').textContent = 'disconnected';
           ui('status').className = 'status-badge status-error';
         });
 
+        console.log('Connecting to GATT server...');
         server = await device.gatt.connect();
+        console.log('GATT server connected:', server);
+        console.log('Getting FTMS primary service...');
         ftms = await server.getPrimaryService(FTMS_SERVICE);
+        console.log('FTMS service obtained:', ftms);
 
         // Characteristics we use
+        console.log('Getting characteristics...');
         chCtrl       = await ftms.getCharacteristic(CH_FITNESS_MACHINE_CONTROL);
+        console.log('Fitness Machine Control characteristic:', chCtrl);
         chData       = await ftms.getCharacteristic(CH_TREADMILL_DATA);
-        chSpeedRange = await ftms.getCharacteristic(CH_SUPPORTED_SPEED_RANGE).catch(() => null);
+        console.log('Treadmill Data characteristic:', chData);
+        chSpeedRange = await ftms.getCharacteristic(CH_SUPPORTED_SPEED_RANGE).catch((e) => {
+            console.warn('Supported Speed Range characteristic not found:', e);
+            return null;
+        });
+        console.log('Supported Speed Range characteristic:', chSpeedRange);
+
 
         // Listen for control point responses (indications)
         try {
+          console.log('Starting notifications for Control Point...');
           await chCtrl.startNotifications();
           chCtrl.addEventListener('characteristicvaluechanged', onControlPointIndication);
+          console.log('Control Point notifications started.');
         } catch (e) {
+          console.error('Failed to start Control Point notifications:', e);
           log('Could not enable Control Point indications: ' + e.message, 'warn');
         }
 
         // Request control (mandatory before sending control commands on many machines)
+        console.log('Requesting control of the fitness machine...');
         await writeControl(OP_REQUEST_CONTROL);
 
         // Subscribe to treadmill data for live speed
+        console.log('Starting notifications for Treadmill Data...');
         await chData.startNotifications();
         chData.addEventListener('characteristicvaluechanged', onTreadmillData);
+        console.log('Treadmill Data notifications started.');
 
         // Read supported speed range if available
         if (chSpeedRange) {
+          console.log('Reading Supported Speed Range...');
           const dv = await chSpeedRange.readValue();
+          console.log('Supported Speed Range raw value:', dv);
           // All are uint16 little-endian in 0.01 km/h
           minKph  = dv.getUint16(0, true) / 100;
           maxKph  = dv.getUint16(2, true) / 100;
           stepKph = dv.getUint16(4, true) / 100;
+          console.log(`Speed range parsed: min=${minKph}, max=${maxKph}, step=${stepKph}`);
           ui('range').textContent = `${minKph.toFixed(1)}–${maxKph.toFixed(1)} km/h`;
           ui('step').textContent  = `${stepKph.toFixed(1)} km/h`;
           targetKph = Math.max(minKph, Math.min(5, maxKph));
           updateTargetDisplay();
         } else {
+          console.warn('No Supported Speed Range characteristic available.');
           ui('range').textContent = 'unknown';
           ui('step').textContent  = '—';
         }
 
         setControlsEnabled(true);
         log('Connected successfully');
+        console.log('Connection process complete.');
       }
 
       function setControlsEnabled(enabled) {
+        console.log(`Setting controls enabled state to: ${enabled}`);
         ui('btnStart').disabled = !enabled;
         ui('btnStop').disabled  = !enabled;
         ui('btnPlus').disabled  = !enabled;
@@ -331,28 +364,37 @@
 
       function onTreadmillData(event) {
         const dv = event.target.value; // DataView
+        console.log('Received Treadmill Data notification:', dv);
         // Per spec, first 2 bytes are Flags. Instantaneous Speed presence is indicated by a flag.
         const flags = dv.getUint16(0, true);
+        console.log(`Treadmill Data flags: 0x${flags.toString(16).padStart(4, '0')}`);
         // In FTMS, when present, Instantaneous Speed comes right after flags as uint16 in 0.01 km/h.
         // Not all devices are perfectly spec-compliant; this covers the common case.
         let offset = 2;
         const INSTANT_SPEED_PRESENT = (flags & 0x0001) !== 0; // spec: bit 0
+        console.log(`Instantaneous Speed present: ${INSTANT_SPEED_PRESENT}`);
         if (INSTANT_SPEED_PRESENT) {
-          const speedKph = dv.getUint16(offset, true) / 100; offset += 2;
+          const speedRaw = dv.getUint16(offset, true);
+          const speedKph = speedRaw / 100;
+          offset += 2;
+          console.log(`Instantaneous Speed raw=${speedRaw}, kph=${speedKph}`);
           ui('speed').textContent = speedKph.toFixed(1);
         }
       }
 
       function onControlPointIndication(event) {
         const dv = event.target.value;
+        console.log('Received Control Point indication:', dv);
         // Response format: Op Code (0x80), Request Op Code, Result Code, [optional parameter]
         const op   = dv.getUint8(0);
         const req  = dv.getUint8(1);
         const rc   = dv.getUint8(2);
+        console.log(`CP Response: op=0x${op.toString(16)}, req_op=0x${req.toString(16)}, result=${rc}`);
         log(`CP response op=0x${op.toString(16)} req=${req} rc=${rc}`);
       }
 
       async function writeControl(opcode, parameterUint16 /* optional */) {
+        console.log(`writeControl called: opcode=0x${opcode.toString(16)}, parameter=${parameterUint16}`);
         // Control Point writes are variable length. Parameters are Little Endian per spec.
         let payload;
         if (typeof parameterUint16 === 'number') {
@@ -363,40 +405,88 @@
         } else {
           payload = new Uint8Array([opcode]);
         }
-        await chCtrl.writeValueWithoutResponse(payload).catch(async () => {
+        console.log('Writing payload to control characteristic:', payload);
+        try {
+            await chCtrl.writeValueWithoutResponse(payload);
+            console.log('writeValueWithoutResponse successful.');
+        } catch(e) {
+          console.warn('writeValueWithoutResponse failed, trying writeValue:', e);
           // Some devices require Write With Response; try the other method.
-          await chCtrl.writeValue(payload);
-        });
+          try {
+            await chCtrl.writeValue(payload);
+            console.log('writeValue successful.');
+          } catch (e2) {
+            console.error('Both writeValueWithoutResponse and writeValue failed:', e2);
+            throw e2; // re-throw the error to be caught by the caller
+          }
+        }
       }
 
       async function start() {
+        console.log('start function called');
         await writeControl(OP_START_OR_RESUME);
         log('Start command sent');
+        console.log('Start command sent successfully.');
       }
 
       async function stop() {
+        console.log('stop function called');
         await writeControl(OP_STOP_OR_PAUSE);
         log('Stop command sent');
+        console.log('Stop command sent successfully.');
       }
 
       async function bump(delta) {
+        console.log(`bump function called with delta: ${delta}`);
         targetKph = +(targetKph + delta).toFixed(1);
         clampTarget();
         // Convert km/h to 0.01 km/h integer per spec
         const value = Math.round(targetKph * 100);
+        console.log(`Setting target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
         await writeControl(OP_SET_TARGET_SPEED, value);
         log(`Speed target set to ${targetKph.toFixed(1)} km/h`);
+        console.log('Set target speed command sent successfully.');
       }
 
       // ===== wire up UI =====
-      ui('btnConnect').addEventListener('click', () => connect().catch(e => log(e.message, 'error')));
-      ui('btnStart').addEventListener('click', () => start().catch(e => log(e.message, 'error')));
-      ui('btnStop').addEventListener('click',  () => stop().catch(e => log(e.message, 'error')));
-      ui('btnPlus').addEventListener('click',  () => bump(+0.5).catch(e => log(e.message, 'error')));
-      ui('btnMinus').addEventListener('click', () => bump(-0.5).catch(e => log(e.message, 'error')));
+      ui('btnConnect').addEventListener('click', () => {
+        console.log('Connect button clicked');
+        connect().catch(e => {
+            console.error('Connection failed:', e);
+            log(e.message, 'error');
+        });
+      });
+      ui('btnStart').addEventListener('click', () => {
+        console.log('Start button clicked');
+        start().catch(e => {
+            console.error('Start command failed:', e);
+            log(e.message, 'error');
+        });
+      });
+      ui('btnStop').addEventListener('click',  () => {
+        console.log('Stop button clicked');
+        stop().catch(e => {
+            console.error('Stop command failed:', e);
+            log(e.message, 'error');
+        });
+      });
+      ui('btnPlus').addEventListener('click',  () => {
+        console.log('Plus button clicked');
+        bump(+0.5).catch(e => {
+            console.error('Bump +0.5 failed:', e);
+            log(e.message, 'error');
+        });
+      });
+      ui('btnMinus').addEventListener('click', () => {
+        console.log('Minus button clicked');
+        bump(-0.5).catch(e => {
+            console.error('Bump -0.5 failed:', e);
+            log(e.message, 'error');
+        });
+      });
 
       // Initialize display
-      updateTargetDisplay();
+      console.log('Script initialization complete.');
     })();
     </script>
 </body>
