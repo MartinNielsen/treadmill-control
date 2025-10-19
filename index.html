@@ -207,14 +207,6 @@
 
         <div class="log" id="log"></div>
 
-        <div class="notes">
-            <strong>Notes:</strong>
-            <ul>
-                <li>Most FTMS devices require a <em>Request Control</em> before you can change targets. This app sends it on connect.</li>
-                <li>Speed values use 0.01 km/h units on the wire. We show km/h in the UI.</li>
-                <li>This app must be served over <strong>HTTPS</strong> and run in a supported browser (e.g., Chrome/Edge). Some platforms disable Web Bluetooth.</li>
-            </ul>
-        </div>
     </div>
 
     <script>
@@ -460,7 +452,7 @@
       }
 
       async function start() {
-        const RAMP_UP_DELAY_MS = 10000; // 10 seconds
+        const RAMP_UP_DELAY_MS = 5000; // 5 seconds
 
         console.log('start function called');
         try {
