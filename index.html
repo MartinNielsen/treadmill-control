@@ -372,10 +372,8 @@
 
       function setControlsEnabled(enabled) {
         console.log(`Setting controls enabled state to: ${enabled}`);
-        ui('btnStart').disabled = !enabled;
-        ui('btnStop').disabled  = !enabled;
-        ui('btnPlus').disabled  = !enabled;
-        ui('btnMinus').disabled = !enabled;
+                ui('btnStart').disabled = !enabled;
+                ui('btnStop').disabled  = !enabled;
         ui('btnConnect').hidden = enabled;
         ui('btnDisconnect').hidden = !enabled;
       }
@@ -489,17 +487,11 @@
         console.log('Stop command sent successfully.');
       }
 
-      async function bump(delta) {
-        console.log(`bump function called with delta: ${delta}`);
+      function adjustTargetSpeed(delta) {
+        console.log(`adjustTargetSpeed function called with delta: ${delta}`);
         targetKph = +(targetKph + delta).toFixed(1);
         clampTarget();
         localStorage.setItem('targetSpeed', targetKph);
-        // Convert km/h to 0.01 km/h integer per spec
-        const value = Math.round(targetKph * 100);
-        console.log(`Setting target speed to ${targetKph.toFixed(1)} km/h (raw value: ${value})`);
-        await writeControl(OP_SET_TARGET_SPEED, value);
-        log(`Speed target set to ${targetKph.toFixed(1)} km/h`);
-        console.log('Set target speed command sent successfully.');
       }
 
       // ===== wire up UI =====
@@ -530,17 +522,11 @@
       });
       ui('btnPlus').addEventListener('click',  () => {
         console.log('Plus button clicked');
-        bump(+0.5).catch(e => {
-            console.error('Bump +0.5 failed:', e);
-            log(e.message, 'error');
-        });
+        adjustTargetSpeed(+0.5);
       });
       ui('btnMinus').addEventListener('click', () => {
         console.log('Minus button clicked');
-        bump(-0.5).catch(e => {
-            console.error('Bump -0.5 failed:', e);
-            log(e.message, 'error');
-        });
+        adjustTargetSpeed(-0.5);
       });
 
       // Initialize display
