@@ -246,8 +246,19 @@
       const OP_SET_TARGET_SPEED= 0x02; // parameter: uint16 of 0.01 km/h
       const OP_START_OR_RESUME = 0x07;
       const OP_STOP_OR_PAUSE   = 0x08;
+      const OP_RESPONSE_CODE   = 0x80;
+      const RESULT_SUCCESS     = 0x01;
+      const CONTROL_POINT_TIMEOUT_MS = 5000;
+      const CONTROL_POINT_RESULT_NAMES = {
+        0x01: 'Success',
+        0x02: 'Op Code Not Supported',
+        0x03: 'Invalid Parameter',
+        0x04: 'Operation Failed',
+        0x05: 'Control Not Permitted'
+      };
 
       const ui = (id) => document.getElementById(id);
+
       const log = (m, level="") => {
         console.log(`[LOG] ${level.toUpperCase()}: ${m}`);
         const el = ui('log');
@@ -263,6 +274,8 @@
       let minKph = 0, maxKph = 20, stepKph = 0.1; // defaults until we read Supported Speed Range
       let currentSpeedKph = 0.0;
       let rampUpTimeout;
+      let controlPointPending = null;
+      let controlPointQueue = Promise.resolve();
 
       // Load target speed from localStorage
       let savedTargetSpeed = localStorage.getItem('targetSpeed');
@@ -288,6 +301,7 @@
 
       async function connect() {
         console.log('connect function started');
+        setControlsEnabled(false);
         if (!('bluetooth' in navigator)) {
           console.error('Web Bluetooth not supported.');
           alert('Web Bluetooth not supported in this browser. Try Chrome/Edge on desktop or Android, over HTTPS.');
@@ -330,20 +344,19 @@
         });
         console.log('Supported Speed Range characteristic:', chSpeedRange);
 
-
-        // Listen for control point responses (indications)
-        try {
-          console.log('Starting notifications for Control Point...');
-          await chCtrl.startNotifications();
-          chCtrl.addEventListener('characteristicvaluechanged', onControlPointIndication);
-          console.log('Control Point notifications started.');
-        } catch (e) {
-          console.error('Failed to start Control Point notifications:', e);
-          log('Could not enable Control Point indications: ' + e.message, 'warn');
+        const controlProperties = chCtrl.properties || {};
+        if (!controlProperties.indicate) {
+          throw new Error('Fitness Machine Control Point does not support indications.');
+        }
+        if (!controlProperties.write || typeof chCtrl.writeValueWithResponse !== 'function') {
+          throw new Error('Fitness Machine Control Point does not support write-with-response.');
         }
 
+        // Listen for control point responses (indications)
+        await chCtrl.startNotifications();
+        chCtrl.addEventListener('characteristicvaluechanged', onControlPointIndication);
+
         // Request control (mandatory before sending control commands on many machines)
-        console.log('Requesting control of the fitness machine...');
         await writeControl(OP_REQUEST_CONTROL);
 
         // Subscribe to treadmill data for live speed
@@ -384,8 +397,17 @@
         }
       }
 
+      function rejectPendingControlPoint(error) {
+        if (!controlPointPending) return;
+        const pending = controlPointPending;
+        controlPointPending = null;
+        clearTimeout(pending.timeoutId);
+        pending.reject(error);
+      }
+
       function onDisconnected() {
         console.warn('GATT server disconnected.');
+        rejectPendingControlPoint(new Error('Fitness Machine Control Point disconnected before a response.'));
         log('Disconnected');
         setControlsEnabled(false);
         ui('status').textContent = 'disconnected';
@@ -402,71 +424,120 @@
 
       function onTreadmillData(event) {
         const dv = event.target.value; // DataView
-        console.log('Received Treadmill Data notification:', dv);
+        if (dv.byteLength < 2) return;
+
         const flags = dv.getUint16(0, true);
-        console.log(`Treadmill Data flags: 0x${flags.toString(16).padStart(4, '0')}`);
-        
-        let offset = 2;
-        // This is a non-standard but common way some treadmills (like yours) send speed.
-        // The speed is often the first field after the flags, even if the "Instantaneous Speed" flag (bit 0) isn't set.
-        // Let's try to read it regardless of the flag.
-        if (dv.byteLength >= 4) {
-            const speedRaw = dv.getUint16(offset, true);
-            const speedKph = speedRaw / 100;
-            offset += 2;
-            
-            // A sanity check: if speed is an absurdly high number, it's probably not speed.
-            if (speedKph < 100) { 
-                console.log(`Instantaneous Speed (heuristic) raw=${speedRaw}, kph=${speedKph}`);
-                ui('speed').textContent = speedKph.toFixed(1);
-                currentSpeedKph = speedKph;
-            } else {
-                console.log(`Heuristic speed reading was too high (${speedKph}), ignoring.`);
-            }
-        } else {
-            console.log('Treadmill data packet is too short to contain speed.');
-        }
+        const moreData = (flags & 0x0001) !== 0;
+
+        // FTMS flag bit 0 is "More Data": when clear, instantaneous speed is
+        // present immediately after the flags; when set, it is omitted.
+        if (moreData || dv.byteLength < 4) return;
+
+        const speedKph = dv.getUint16(2, true) / 100;
+
+        // Ignore implausible values without replacing the last valid live reading.
+        if (speedKph >= 100) return;
+
+        ui('speed').textContent = speedKph.toFixed(1);
+        currentSpeedKph = speedKph;
       }
 
       function onControlPointIndication(event) {
         const dv = event.target.value;
-        console.log('Received Control Point indication:', dv);
+        if (dv.byteLength < 3) {
+          const error = new Error('Control Point response is too short.');
+          console.error(error.message);
+          log(error.message, 'error');
+          rejectPendingControlPoint(error);
+          return;
+        }
+
         // Response format: Op Code (0x80), Request Op Code, Result Code, [optional parameter]
         const op   = dv.getUint8(0);
         const req  = dv.getUint8(1);
         const rc   = dv.getUint8(2);
-        console.log(`CP Response: op=0x${op.toString(16)}, req_op=0x${req.toString(16)}, result=${rc}`);
-        log(`CP response op=0x${op.toString(16)} req=${req} rc=${rc}`);
+        const resultName = CONTROL_POINT_RESULT_NAMES[rc] || `Unknown (0x${rc.toString(16)})`;
+
+        const pending = controlPointPending;
+        if (op !== OP_RESPONSE_CODE) {
+          log(`Unexpected Control Point response opcode 0x${op.toString(16)}`, 'error');
+          return;
+        }
+        if (!pending) {
+          log(`Unexpected Control Point response for opcode 0x${req.toString(16)}`, 'warn');
+          return;
+        }
+        if (req !== pending.opcode) {
+          log(`Control Point response opcode mismatch: expected 0x${pending.opcode.toString(16)}, received 0x${req.toString(16)}`, 'error');
+          return;
+        }
+
+        controlPointPending = null;
+        clearTimeout(pending.timeoutId);
+        if (rc !== RESULT_SUCCESS) {
+          const error = new Error(`Control Point opcode 0x${req.toString(16)} rejected: ${resultName} (0x${rc.toString(16)})`);
+          log(error.message, 'error');
+          pending.reject(error);
+          return;
+        }
+
+        log(`Control Point opcode 0x${req.toString(16)} confirmed: ${resultName}`);
+        pending.resolve({ requestOpcode: req, resultCode: rc });
       }
 
-      async function writeControl(opcode, parameterUint16 /* optional */) {
-        console.log(`writeControl called: opcode=0x${opcode.toString(16)}, parameter=${parameterUint16}`);
-        // Control Point writes are variable length. Parameters are Little Endian per spec.
+      function waitForControlPointResponse(opcode) {
+        if (controlPointPending) {
+          throw new Error('Another Control Point transaction is already in progress.');
+        }
+
+        return new Promise((resolve, reject) => {
+          const timeoutId = setTimeout(() => {
+            if (controlPointPending && controlPointPending.opcode === opcode) {
+              controlPointPending = null;
+              reject(new Error(`Timed out waiting for Control Point response to opcode 0x${opcode.toString(16)}.`));
+            }
+          }, CONTROL_POINT_TIMEOUT_MS);
+          controlPointPending = { opcode, resolve, reject, timeoutId };
+        });
+      }
+
+      async function sendControlPointCommand(opcode, parameter = null) {
+        if (!chCtrl) {
+          throw new Error('Fitness Machine Control Point is not connected.');
+        }
+
+        // Control Point writes are variable length. Numeric parameters are
+        // uint16 little-endian; byte arrays support one-byte Stop/Pause data.
         let payload;
-        if (typeof parameterUint16 === 'number') {
+        if (parameter instanceof Uint8Array) {
+          payload = new Uint8Array(1 + parameter.length);
+          payload[0] = opcode;
+          payload.set(parameter, 1);
+        } else if (typeof parameter === 'number') {
           payload = new Uint8Array(3);
           payload[0] = opcode;
-          payload[1] = parameterUint16 & 0xff;
-          payload[2] = (parameterUint16 >> 8) & 0xff;
+          payload[1] = parameter & 0xff;
+          payload[2] = (parameter >> 8) & 0xff;
         } else {
           payload = new Uint8Array([opcode]);
         }
-        console.log('Writing payload to control characteristic:', payload);
+
+        const responsePromise = waitForControlPointResponse(opcode);
         try {
-            // Per user feedback, the device expects a "request" (Write With Response).
-            await chCtrl.writeValue(payload);
-            console.log('writeValue (request) successful.');
-        } catch(e) {
-          console.warn('writeValue (request) failed, trying writeValueWithoutResponse (command):', e);
-          // As a fallback, try the other method.
-          try {
-            await chCtrl.writeValueWithoutResponse(payload);
-            console.log('writeValueWithoutResponse (command) successful.');
-          } catch (e2) {
-            console.error('Both writeValue and writeValueWithoutResponse failed:', e2);
-            throw e2; // re-throw the error to be caught by the caller
+          await chCtrl.writeValueWithResponse(payload);
+          return await responsePromise;
+        } catch (error) {
+          if (controlPointPending && controlPointPending.opcode === opcode) {
+            rejectPendingControlPoint(error);
           }
+          throw error;
         }
+      }
+
+      function writeControl(opcode, parameter = null) {
+        const transaction = controlPointQueue.then(() => sendControlPointCommand(opcode, parameter));
+        controlPointQueue = transaction.catch(() => {});
+        return transaction;
       }
 
       async function start() {
@@ -475,12 +546,12 @@
         console.log('start function called');
         try {
             await writeControl(OP_START_OR_RESUME);
-            log('Start command sent');
+            log('Start command confirmed');
     
             const initialSpeed = 1.0;
             const value = Math.round(initialSpeed * 100);
             await writeControl(OP_SET_TARGET_SPEED, value);
-            log(`Initial speed target set to 1.0 km/h. Waiting ${RAMP_UP_DELAY_MS / 1000}s for ramp-up...`);
+            log(`Initial speed target confirmed at 1.0 km/h. Waiting ${RAMP_UP_DELAY_MS / 1000}s for ramp-up...`);
 
             // Wait for the treadmill to ramp up before setting the final target speed
             rampUpTimeout = setTimeout(async () => {
@@ -488,15 +559,17 @@
                     const targetValue = Math.round(targetKph * 100);
                     console.log(`Ramp-up delay complete. Setting target speed to ${targetKph.toFixed(1)} km/h`);
                     await writeControl(OP_SET_TARGET_SPEED, targetValue);
-                    log(`Target speed set to ${targetKph.toFixed(1)} km/h`);
+                    log(`Target speed confirmed at ${targetKph.toFixed(1)} km/h`);
                 } catch (e) {
                     console.error('Error setting target speed after delay:', e);
+                    setControlsEnabled(false);
                     log(e.message, 'error');
                 }
             }, RAMP_UP_DELAY_MS);
 
         } catch (e) {
             console.error('Failed to send start commands:', e);
+            setControlsEnabled(false);
             log(e.message, 'error');
         }
       }
@@ -504,9 +577,8 @@
       async function stop() {
         console.log('stop function called');
         clearTimeout(rampUpTimeout); // Clear the ramp-up timeout
-        await writeControl(OP_STOP_OR_PAUSE);
-        log('Stop command sent');
-        console.log('Stop command sent successfully.');
+        await writeControl(OP_STOP_OR_PAUSE, new Uint8Array([0x01]));
+        log('Stop command confirmed');
       }
 
       function adjustTargetSpeed(delta) {
@@ -521,6 +593,7 @@
         console.log('Connect button clicked');
         connect().catch(e => {
             console.error('Connection failed:', e);
+            setControlsEnabled(false);
             log(e.message, 'error');
         });
       });
@@ -532,6 +605,7 @@
         console.log('Start button clicked');
         start().catch(e => {
             console.error('Start command failed:', e);
+            setControlsEnabled(false);
             log(e.message, 'error');
         });
       });
@@ -539,6 +613,7 @@
         console.log('Stop button clicked');
         stop().catch(e => {
             console.error('Stop command failed:', e);
+            setControlsEnabled(false);
             log(e.message, 'error');
         });
       });
