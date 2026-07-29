@@ -9,7 +9,7 @@
     <link rel="manifest" href="manifest.json">
     
     <!-- Theme color for browser chrome -->
-    <meta name="theme-color" content="#667eea">
+    <meta name="theme-color" content="#101516">
     
     <!-- iOS PWA meta tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -34,7 +34,7 @@
             min-height: 100vh;
             margin: 0;
             padding: 2rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #101516;
             color: white;
             box-sizing: border-box;
         }
@@ -42,17 +42,17 @@
             max-width: 600px;
             width: 100%;
             padding: 2rem;
-            background: rgba(255, 255, 255, 0.1);
+            background: transparent;
             border-radius: 20px;
-            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-            backdrop-filter: blur(4px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: none;
+            backdrop-filter: none;
+            border: 0;
         }
         h1 {
             font-size: 2.5rem;
             margin: 0 0 0.5rem 0;
             text-align: center;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            text-shadow: none;
         }
         .subtitle {
             text-align: center;
@@ -333,92 +333,454 @@
             white-space: nowrap;
             border: 0;
         }
+
+        :root {
+            --bg: #101516;
+            --surface: #192123;
+            --surface-strong: #222d2f;
+            --surface-muted: #141c1e;
+            --border: #344447;
+            --text: #f4f7f6;
+            --muted: #a7b8b7;
+            --teal: #38d9c1;
+            --green: #2fc66d;
+            --amber: #f5b942;
+            --red: #f05d5e;
+            --focus: #8ff8e8;
+        }
+
+        body {
+            display: block;
+            min-height: 100svh;
+            padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+            background: var(--bg);
+            color: var(--text);
+        }
+        .container {
+            max-width: 430px;
+            width: 100%;
+            min-height: calc(100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+            margin: 0;
+            padding: 20px 16px 28px;
+            box-sizing: border-box;
+            background: transparent;
+            border-radius: 0;
+            box-shadow: none;
+            backdrop-filter: none;
+            border: 0;
+        }
+        h1 {
+            font-size: 1.25rem;
+            margin: 0;
+            text-align: left;
+            letter-spacing: -0.02em;
+            text-shadow: none;
+        }
+        button {
+            min-height: 48px;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--surface-strong);
+            color: var(--text);
+            font-size: 0.95rem;
+            transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+            backdrop-filter: none;
+        }
+        button:hover:not(:disabled) {
+            background: #2b393b;
+            transform: none;
+        }
+        button:focus-visible {
+            outline: 3px solid var(--focus);
+            outline-offset: 3px;
+        }
+        button:disabled {
+            background: var(--surface-muted);
+            color: #718180;
+        }
+        .app-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .eyebrow,
+        .section-label,
+        .status-label {
+            margin: 0 0 6px;
+            color: var(--muted);
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+        .connection {
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            flex-direction: column;
+        }
+        .connection button {
+            min-height: 48px;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+        }
+        .device-name {
+            max-width: 170px;
+            overflow: hidden;
+            color: var(--muted);
+            font-size: 0.75rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .status-badge {
+            padding: 0.3rem 0.55rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--surface-muted);
+            color: var(--muted);
+            font-size: 0.7rem;
+        }
+        .status-ok {
+            background: #12352d;
+            border-color: #247d68;
+            color: var(--teal);
+        }
+        .status-warn {
+            background: #3c2d12;
+            border-color: #a67521;
+            color: var(--amber);
+        }
+        .status-error {
+            background: #3a1d21;
+            border-color: #a9474b;
+            color: #ff9c9d;
+        }
+        .speed-hero {
+            margin-top: 26px;
+            padding: 22px 20px;
+            border: 1px solid #28645d;
+            border-radius: 14px;
+            background: #142624;
+        }
+        .speed-hero .stat-label {
+            color: var(--teal);
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .speed-hero .stat-value {
+            margin: 8px 0 0;
+            color: var(--teal);
+            font-size: clamp(3.8rem, 18vw, 5.8rem);
+            line-height: 0.95;
+            letter-spacing: -0.08em;
+        }
+        .speed-hero .stat-unit {
+            margin-left: 6px;
+            color: var(--muted);
+            font-size: 1rem;
+            letter-spacing: 0;
+        }
+        .data-panel {
+            margin-top: 12px;
+        }
+        .live-metrics {
+            margin: 12px 0 0;
+        }
+        .live-metrics h2 {
+            display: none;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .metric-card {
+            min-width: 0;
+            padding: 14px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--surface);
+        }
+        .metric-card h3 {
+            margin: 0 0 7px;
+            color: var(--muted);
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .metric-value {
+            margin: 0;
+            color: var(--teal);
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+        .metric-unit {
+            color: var(--muted);
+            font-size: 0.75rem;
+        }
+        .target-section {
+            margin-top: 28px;
+            padding: 18px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--surface);
+        }
+        .target-heading {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .target-heading h2 {
+            margin: 0;
+            font-size: 1.05rem;
+        }
+        .target-range {
+            color: var(--muted);
+            font-size: 0.7rem;
+            text-align: right;
+        }
+        .target-value {
+            margin: 14px 0;
+            color: var(--text);
+            font-size: 2.2rem;
+            font-weight: 700;
+            letter-spacing: -0.04em;
+        }
+        .target-value .stat-unit {
+            color: var(--muted);
+            font-size: 0.9rem;
+            letter-spacing: 0;
+        }
+        .speed-controls {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+        }
+        .speed-controls button {
+            padding: 0.5rem 0.25rem;
+            font-size: 0.85rem;
+        }
+        .control-dock {
+            display: grid;
+            grid-template-columns: 1.15fr 1.15fr 1fr;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .control-dock button {
+            min-height: 64px;
+            padding: 0.75rem 0.5rem;
+            font-size: 1rem;
+        }
+        #btnStart {
+            background: var(--green);
+            border-color: var(--green);
+            color: #07150d;
+        }
+        #btnStart:disabled {
+            background: #245539;
+            border-color: #245539;
+            color: #a5c1ad;
+        }
+        #btnStop {
+            background: var(--red);
+            border-color: var(--red);
+            color: #22090a;
+        }
+        #btnStop:disabled {
+            background: #5d2c30;
+            border-color: #5d2c30;
+            color: #d3a0a1;
+        }
+        #btnSlowest[aria-pressed="true"] {
+            background: var(--amber);
+            border-color: var(--amber);
+            box-shadow: 0 0 0 3px #5d4516;
+            color: #211505;
+        }
+        .operational-status {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            min-height: 24px;
+            margin-top: 16px;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+        .operational-status .status-label {
+            margin: 0;
+            flex: 0 0 auto;
+        }
+        #operationalStatus {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .session-history {
+            margin-top: 34px;
+            padding-top: 22px;
+            border-top: 1px solid var(--border);
+        }
+        .session-history-header {
+            align-items: center;
+        }
+        .session-history h2 {
+            font-size: 1.05rem;
+        }
+        .session-history-note,
+        .session-history th,
+        .session-history td {
+            color: var(--muted);
+        }
+        .session-history-note {
+            line-height: 1.45;
+        }
+        .session-history-table-wrap {
+            border-color: var(--border);
+            background: var(--surface);
+        }
+        .session-history table {
+            background: transparent;
+        }
+        .session-history th,
+        .session-history td {
+            border-color: var(--border);
+        }
+        .session-history td {
+            color: var(--text);
+        }
+        .session-history-empty {
+            border-color: var(--border);
+            color: var(--muted);
+        }
+        .session-delete-button {
+            min-height: 48px;
+            min-width: 48px;
+            padding: 0.35rem;
+            background: var(--surface-strong);
+        }
+        dialog {
+            border-color: var(--border);
+            background: var(--surface-strong);
+            color: var(--text);
+        }
+        .destructive-button {
+            background: var(--red);
+            border-color: var(--red);
+            color: #22090a;
+        }
+        .log {
+            margin-top: 24px;
+            height: 120px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #0c1112;
+            color: var(--muted);
+        }
+        @media (max-width: 360px) {
+            .container {
+                padding-inline: 12px;
+            }
+            .control-dock button {
+                font-size: 0.88rem;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Treadmill Control</h1>
-        <!-- <p class="subtitle">Connect to a Bluetooth treadmill that implements the Fitness Machine Service (FTMS, UUID <span class="mono">0x1826</span>). You can Start/Stop the belt and adjust speed ±0.5 km/h.</p> -->
-        
-        <div class="row">
-            <button id="btnConnect">🔗 Connect</button>
-            <button id="btnDisconnect" hidden>🔌 Disconnect</button>
-            <span id="status" class="status-badge">idle</span>
-        </div>
-
-        <div class="grid">
-            <div class="stat-card" id="metricInstantaneousSpeed" hidden>
-                <div class="stat-label">Current Speed</div>
-                <div class="stat-value">
-                    <span id="speed">0.0</span> 
-                    <span class="stat-unit">km/h</span>
-                </div>
-                <div class="stat-label">Device: <span id="deviceName">—</span></div>
+        <header class="app-header">
+            <div>
+                <p class="eyebrow">FTMS CONTROL</p>
+                <h1>Treadmill Control</h1>
             </div>
-            <div class="stat-card">
-                <div class="stat-label">Target Speed</div>
-                <div class="stat-value">
-                    <span id="target">0.0</span> 
-                    <span class="stat-unit">km/h</span>
+            <div class="connection">
+                <button id="btnConnect" type="button">Connect</button>
+                <button id="btnDisconnect" type="button" hidden>Disconnect</button>
+                <span class="device-name">Device: <span id="deviceName">—</span></span>
+                <span id="status" class="status-badge">idle</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero-metrics" aria-labelledby="currentSpeedTitle">
+                <article class="speed-hero" id="metricInstantaneousSpeed" hidden>
+                    <div class="stat-label" id="currentSpeedTitle">Current speed</div>
+                    <div class="stat-value">
+                        <span id="speed">0.0</span>
+                        <span class="stat-unit">km/h</span>
+                    </div>
+                </article>
+
+                <section id="liveMetrics" class="live-metrics" aria-labelledby="liveMetricsTitle" hidden>
+                    <h2 id="liveMetricsTitle">Live data</h2>
+                    <div class="metric-grid">
+                        <article class="metric-card" id="metricTotalDistance" hidden>
+                            <h3>Total distance</h3>
+                            <p class="metric-value"><span id="metricTotalDistanceValue">—</span> <span class="metric-unit">m</span></p>
+                        </article>
+                        <article class="metric-card" id="metricElapsedTime" hidden>
+                            <h3>Elapsed time</h3>
+                            <p class="metric-value"><span id="metricElapsedTimeValue">—</span> <span class="metric-unit">min:s</span></p>
+                        </article>
+                    </div>
+                </section>
+            </section>
+
+            <section class="target-section" aria-labelledby="targetSpeedTitle">
+                <div class="target-heading">
+                    <h2 id="targetSpeedTitle">Target speed</h2>
+                    <div class="target-range">Range <span id="range">—</span><br>Step <span id="step">—</span></div>
                 </div>
-                <div class="speed-controls" style="margin-top: 1rem; justify-content: center; display: flex; gap: 0.5rem;">
-                    <button id="btnMinusSmall" type="button" aria-label="Decrease target speed by 0.1 km/h">−0.1</button>
+                <div class="target-value"><span id="target">0.0</span> <span class="stat-unit">km/h</span></div>
+                <div class="speed-controls" aria-label="Target speed adjustments">
                     <button id="btnMinus" type="button" aria-label="Decrease target speed by 0.5 km/h">−0.5</button>
-                    <button id="btnPlus" type="button" aria-label="Increase target speed by 0.5 km/h">+0.5</button>
+                    <button id="btnMinusSmall" type="button" aria-label="Decrease target speed by 0.1 km/h">−0.1</button>
                     <button id="btnPlusSmall" type="button" aria-label="Increase target speed by 0.1 km/h">+0.1</button>
+                    <button id="btnPlus" type="button" aria-label="Increase target speed by 0.5 km/h">+0.5</button>
                 </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Allowed Range</div>
-                <div class="stat-value" style="font-size: 1.5rem;">
-                    <span id="range">—</span>
+            </section>
+
+            <section class="control-dock" aria-label="Treadmill controls">
+                <button id="btnStart" type="button" disabled>Start</button>
+                <button id="btnStop" type="button" disabled>Stop</button>
+                <button id="btnSlowest" type="button" aria-pressed="false" disabled>Slowest</button>
+            </section>
+
+            <section class="operational-status" aria-label="Operational status" aria-live="polite">
+                <span class="status-label">Status</span>
+                <span id="operationalStatus">Ready to connect.</span>
+            </section>
+
+            <section class="session-history" aria-labelledby="sessionHistoryTitle">
+                <div class="session-history-header">
+                    <h2 id="sessionHistoryTitle">Walking sessions</h2>
+                    <button id="btnClearHistory" class="secondary-button" type="button">Clear history</button>
                 </div>
-                <div class="stat-label">Step: <span id="step">—</span></div>
-            </div>
-        </div>
+                <p class="session-history-note">Stored only in this browser on this device. An unfinished session stays here if Bluetooth disconnects.</p>
+                <div id="sessionHistoryContent">
+                    <p class="session-history-empty">No walking sessions recorded yet.</p>
+                </div>
+            </section>
 
-        <div class="controls">
-            <button id="btnStart" disabled>▶️ Start</button>
-            <button id="btnSlowest" type="button" aria-pressed="false" disabled>Slowest</button>
-            <button id="btnStop" disabled>⏸ Stop</button>
-        </div>
+            <dialog id="clearHistoryDialog" aria-labelledby="clearHistoryDialogTitle" aria-describedby="clearHistoryDialogDescription">
+                <h2 id="clearHistoryDialogTitle">Clear walking history?</h2>
+                <p id="clearHistoryDialogDescription">This permanently deletes all saved walking sessions from this browser on this device.</p>
+                <form method="dialog" class="dialog-actions">
+                    <button id="cancelClearHistory" type="submit" value="cancel">Cancel</button>
+                    <button id="confirmClearHistory" class="destructive-button" type="submit" value="confirm">Clear history</button>
+                </form>
+            </dialog>
 
-        <section id="liveMetrics" class="live-metrics" aria-labelledby="liveMetricsTitle">
-            <h2 id="liveMetricsTitle">Live FTMS metrics</h2>
-            <div class="metric-grid">
-                <article class="metric-card" id="metricTotalDistance" hidden>
-                    <h3>Total Distance</h3>
-                    <p class="metric-value"><span id="metricTotalDistanceValue">—</span> <span class="metric-unit">m</span></p>
-                </article>
-                <article class="metric-card" id="metricElapsedTime" hidden>
-                    <h3>Elapsed Time</h3>
-                    <p class="metric-value"><span id="metricElapsedTimeValue">—</span> <span class="metric-unit">min:s</span></p>
-                </article>
-            </div>
-        </section>
-
-        <section class="session-history" aria-labelledby="sessionHistoryTitle">
-            <div class="session-history-header">
-                <h2 id="sessionHistoryTitle">Walking session history</h2>
-                <button id="btnClearHistory" class="secondary-button" type="button">Clear history</button>
-            </div>
-            <p class="session-history-note">Stored only in this browser on this device. An unfinished session stays here if Bluetooth disconnects.</p>
-            <div id="sessionHistoryContent">
-                <p class="session-history-empty">No walking sessions recorded yet.</p>
-            </div>
-        </section>
-
-        <dialog id="clearHistoryDialog" aria-labelledby="clearHistoryDialogTitle" aria-describedby="clearHistoryDialogDescription">
-            <h2 id="clearHistoryDialogTitle">Clear walking history?</h2>
-            <p id="clearHistoryDialogDescription">This permanently deletes all saved walking sessions from this browser on this device.</p>
-            <form method="dialog" class="dialog-actions">
-                <button id="cancelClearHistory" type="submit" value="cancel">Cancel</button>
-                <button id="confirmClearHistory" class="destructive-button" type="submit" value="confirm">Clear history</button>
-            </form>
-        </dialog>
-
-        <div class="log" id="log"></div>
-
+            <div class="log" id="log" hidden></div>
+        </main>
     </div>
 
     <script>
@@ -631,6 +993,8 @@
         const el = ui('log');
         el.textContent += m + "\n";
         el.scrollTop = el.scrollHeight;
+        el.hidden = false;
+        ui('operationalStatus').textContent = m;
         ui('status').textContent = level || 'connected';
         ui('status').className = 'status-badge ' + (level === 'error' ? 'status-error' : level === 'warn' ? 'status-warn' : 'status-ok');
       };
@@ -718,11 +1082,13 @@
       function updateLiveMetrics(values) {
         if (Object.prototype.hasOwnProperty.call(values, 'totalDistance') && values.totalDistance !== 0xFFFFFF) {
           latestTotalDistance = values.totalDistance;
+          ui('liveMetrics').hidden = false;
           ui('metricTotalDistanceValue').textContent = values.totalDistance.toString();
           setMetricVisible('metricTotalDistance', true);
         }
         if (Object.prototype.hasOwnProperty.call(values, 'elapsedTime') && values.elapsedTime !== 0xFFFF) {
           latestElapsedTime = values.elapsedTime;
+          ui('liveMetrics').hidden = false;
           ui('metricElapsedTimeValue').textContent = formatDuration(values.elapsedTime);
           setMetricVisible('metricElapsedTime', true);
         }
@@ -744,6 +1110,7 @@
         setMetricVisible('metricInstantaneousSpeed', false);
         setMetricVisible('metricTotalDistance', false);
         setMetricVisible('metricElapsedTime', false);
+        ui('liveMetrics').hidden = true;
       }
 
       async function connect() {
