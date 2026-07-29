@@ -293,17 +293,16 @@
         .session-start-time {
             white-space: nowrap;
         }
-        .session-history .secondary-button {
-            padding: 0.5rem 0.75rem;
-            font-size: 0.8rem;
-        }
-        .session-delete-button {
-            padding: 0.35rem 0.55rem;
+        .session-action-button {
+            display: inline-grid;
+            place-items: center;
             min-width: 2.2rem;
+            min-height: 2.2rem;
+            padding: 0.35rem;
             font-size: 1rem;
             line-height: 1;
         }
-        .session-delete-button:focus-visible {
+        .session-action-button:focus-visible {
             outline: 3px solid #ffffff;
             outline-offset: 3px;
             box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.7);
@@ -313,19 +312,12 @@
             align-items: center;
             gap: 0.4rem;
         }
-        .session-resume-button {
-            padding: 0.35rem;
-            min-width: 2.2rem;
-            font-size: 1rem;
-            line-height: 1;
-            background: var(--green);
-            border-color: var(--green);
-            color: #07150d;
-        }
-        .session-resume-button.is-active {
-            background: var(--green);
-            border-color: var(--green);
-            color: #07150d;
+        .session-name {
+            display: block;
+            margin-bottom: 0.2rem;
+            color: var(--text);
+            font-weight: 600;
+            overflow-wrap: anywhere;
         }
         .session-extra {
             display: block;
@@ -363,6 +355,81 @@
             justify-content: flex-end;
             gap: 0.6rem;
             flex-wrap: wrap;
+        }
+        .session-action-dialog form {
+            margin: 0;
+        }
+        .session-action-dialog {
+            position: relative;
+            padding-top: 2.2rem;
+        }
+        .session-dialog-close {
+            position: absolute;
+            top: 0.65rem;
+            right: 0.65rem;
+            min-width: 2.2rem;
+            min-height: 2.2rem;
+            padding: 0.25rem;
+            font-size: 1.25rem;
+            line-height: 1;
+        }
+        .session-action-dialog label {
+            display: block;
+            margin-bottom: 0.35rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .session-name-edit {
+            display: flex;
+            align-items: stretch;
+            gap: 0.45rem;
+            margin-bottom: 0.8rem;
+        }
+        .session-action-dialog input {
+            flex: 1 1 auto;
+            min-width: 0;
+            box-sizing: border-box;
+            padding: 0.65rem 0.7rem;
+            border: 1px solid var(--border, rgba(255, 255, 255, 0.3));
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.18);
+            color: inherit;
+            font: inherit;
+        }
+        .session-icon-button {
+            display: inline-grid;
+            place-items: center;
+            flex: 0 0 auto;
+            min-width: 2.65rem;
+            min-height: 2.65rem;
+            padding: 0.35rem;
+            font-size: 1.1rem;
+            line-height: 1;
+        }
+        .session-play-button {
+            background: var(--green);
+            border-color: var(--green);
+            color: #07150d;
+        }
+        .session-delete-button {
+            background: var(--red);
+            border-color: var(--red);
+            color: #22090a;
+        }
+        .session-action-controls {
+            display: flex;
+            justify-content: flex-start;
+            gap: 0.6rem;
+            margin-top: 0.7rem;
+        }
+        .session-name-editor {
+            margin-top: 0;
+            padding-top: 0.9rem;
+        }
+        .session-action-status {
+            margin-bottom: 1rem;
+            color: var(--muted, inherit);
+            font-size: 0.85rem;
         }
         .sr-only {
             position: absolute;
@@ -702,15 +769,10 @@
             border-color: var(--border);
             color: var(--muted);
         }
-        .session-delete-button {
-            min-height: 48px;
-            min-width: 48px;
-            padding: 0.35rem;
+        .session-action-button {
+            min-height: 44px;
+            min-width: 44px;
             background: var(--surface-strong);
-        }
-        .session-resume-button {
-            min-height: 48px;
-            min-width: 48px;
         }
         dialog {
             border-color: var(--border);
@@ -823,6 +885,23 @@
                 </form>
             </dialog>
 
+            <dialog id="sessionActionDialog" class="session-action-dialog" aria-label="Session actions">
+                <button id="closeSessionActionDialog" class="session-dialog-close" type="button" aria-label="Close session actions" title="Close">×</button>
+                <div class="session-action-controls">
+                    <button id="sessionPlayButton" class="session-icon-button session-play-button" type="button" aria-label="Play or resume session" title="Play or resume">▶</button>
+                    <button id="sessionDeleteButton" class="session-icon-button session-delete-button" type="button" aria-label="Delete session" title="Delete">🗑</button>
+                    <button id="sessionRenameButton" class="session-icon-button" type="button" aria-label="Rename session" title="Rename session">✎</button>
+                </div>
+                <form id="sessionRenameForm" class="session-name-editor" hidden>
+                    <label class="sr-only" for="sessionNameInput">Session name</label>
+                    <div class="session-name-edit">
+                        <input id="sessionNameInput" name="name" type="text" maxlength="80" autocomplete="off" placeholder="Optional session name">
+                        <button id="saveSessionName" class="session-icon-button" type="submit" aria-label="Save session name" title="Save name">✓</button>
+                        <button id="clearSessionName" class="session-icon-button" type="button" aria-label="Clear session name" title="Clear name">×</button>
+                    </div>
+                </form>
+            </dialog>
+
             <div class="log" id="log" hidden></div>
         </main>
     </div>
@@ -913,8 +992,10 @@
       function saveSessionHistory() {
         try {
           localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(sessionHistory));
+          return true;
         } catch (error) {
           console.warn('Unable to save session history:', error);
+          return false;
         }
       }
 
@@ -932,12 +1013,27 @@
         return `<span class="session-start-date">${datePart}</span><br><span class="session-start-time">${timePart}</span>`;
       }
 
-      function formatDistance(distance) {
-        return isValidDistance(distance) ? `${Math.round(distance)} m` : 'Unavailable';
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
       }
 
-      function getLatestCompletedSession() {
-        return [...sessionHistory].reverse().find((session) => session.endedAt !== null && session.endedAt !== undefined) || null;
+      function getSessionName(session) {
+        return typeof session.name === 'string' ? session.name.trim() : '';
+      }
+
+      function formatSessionStartedCell(session) {
+        const name = getSessionName(session);
+        const nameMarkup = name ? `<span class="session-name">${escapeHtml(name)}</span>` : '';
+        return `${nameMarkup}${formatSessionStartedAt(session.startedAt)}`;
+      }
+
+      function formatDistance(distance) {
+        return isValidDistance(distance) ? `${Math.round(distance)} m` : 'Unavailable';
       }
 
       function getResumedSession() {
@@ -967,7 +1063,6 @@
           return;
         }
 
-        const latestCompletedId = getLatestCompletedSession()?.id;
         const rows = [...sessionHistory].reverse().map((session) => {
           const isResumed = resumedSession?.sessionId === session.id;
           const duration = session.endedAt !== null && session.endedAt !== undefined
@@ -978,10 +1073,8 @@
             : formatDistance(session.latestDistance);
           const extraDuration = isResumed ? `<span class="session-extra">+ ${formatDuration(resumedSession.extraDurationSeconds)}</span>` : '';
           const extraDistance = isResumed ? `<span class="session-extra">+ ${formatDistance(resumedSession.extraDistanceMeters)}</span>` : '';
-          const resumeButton = session.id === latestCompletedId || isResumed
-            ? `<button class="session-resume-button${isResumed ? ' is-active' : ''}" type="button" data-session-id="${session.id}" aria-label="${isResumed ? 'Stop resumed session' : 'Resume session'}">${isResumed ? '■' : '▶'}</button>`
-            : '';
-          return `<tr><td>${formatSessionStartedAt(session.startedAt)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}</td><td><div class="session-actions">${resumeButton}<button class="session-delete-button" type="button" data-session-id="${session.id}" aria-label="Delete session">🗑</button></div></td></tr>`;
+          const actionLabel = isResumed ? 'Open actions for active resumed session' : 'Open session actions';
+          return `<tr><td>${formatSessionStartedCell(session)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}</td><td><div class="session-actions"><button class="session-action-button" type="button" data-session-id="${escapeHtml(session.id)}" aria-label="${actionLabel}">⋯</button></div></td></tr>`;
         }).join('');
 
         content.innerHTML = `<div class="session-history-table-wrap">
@@ -991,9 +1084,9 @@
                 <tbody>${rows}</tbody>
             </table>
         </div>`;
-        content.querySelectorAll('.session-delete-button').forEach((button) => {
+        content.querySelectorAll('.session-action-button').forEach((button) => {
           const session = sessionHistory.find((item) => item.id === button.dataset.sessionId);
-          if (session) button.setAttribute('aria-label', `Delete session started ${formatLocalDateTime(session.startedAt)}`);
+          if (session) button.setAttribute('aria-label', `${resumedSession?.sessionId === session.id ? 'Open actions for active resumed session' : 'Open actions for session'} started ${formatLocalDateTime(session.startedAt)}`);
         });
       }
 
@@ -1072,8 +1165,9 @@
       }
 
       function resumeSession(sessionId) {
-        const session = getLatestCompletedSession();
-        if (!controlsAvailable || treadmillRunning || !session || session.id !== sessionId) return;
+        const session = sessionHistory.find((item) => item.id === sessionId);
+        if (!controlsAvailable || treadmillRunning || resumedSession || getInProgressSession() || !session
+            || session.endedAt === null || session.endedAt === undefined) return;
         pendingResumeSessionId = session.id;
         start().catch((error) => {
           pendingResumeSessionId = null;
@@ -1124,6 +1218,19 @@
         if (pendingResumeSessionId === sessionId) pendingResumeSessionId = null;
         saveSessionHistory();
         renderSessionHistory();
+      }
+
+      function renameSession(sessionId, name) {
+        const session = sessionHistory.find((item) => item.id === sessionId);
+        if (!session) return false;
+        const previousName = session.name;
+        session.name = typeof name === 'string' ? name.trim().slice(0, 80) : '';
+        if (!saveSessionHistory()) {
+          session.name = previousName;
+          return false;
+        }
+        renderSessionHistory();
+        return true;
       }
 
       function clearAllHistory() {
@@ -1745,6 +1852,16 @@
       const confirmClearHistoryButton = ui('confirmClearHistory');
       let lastFocusedBeforeClearHistory = null;
       let pendingHistoryDeleteId = null;
+      const sessionActionDialog = ui('sessionActionDialog');
+      const sessionRenameForm = ui('sessionRenameForm');
+      const sessionNameInput = ui('sessionNameInput');
+      const clearSessionNameButton = ui('clearSessionName');
+      const sessionPlayButton = ui('sessionPlayButton');
+      const sessionDeleteButton = ui('sessionDeleteButton');
+      const sessionRenameButton = ui('sessionRenameButton');
+      const closeSessionActionDialogButton = ui('closeSessionActionDialog');
+      let selectedSessionId = null;
+      let lastFocusedBeforeSessionAction = null;
 
       function closeClearHistoryDialog(value = '') {
         if (typeof clearHistoryDialog.close === 'function' && clearHistoryDialog.open) {
@@ -1798,25 +1915,121 @@
         }
         lastFocusedBeforeClearHistory = null;
       });
-      ui('sessionHistoryContent').addEventListener('click', (event) => {
-        const resumeButton = event.target.closest('.session-resume-button');
-        if (resumeButton) {
-          if (resumeButton.classList.contains('is-active')) {
-            stop().catch((error) => {
-              console.error('Resume stop command failed:', error);
-              setControlsEnabled(false);
-              log(error.message, 'error');
-            });
-          } else {
-            resumeSession(resumeButton.dataset.sessionId);
-          }
+
+      function closeSessionActionDialog() {
+        if (typeof sessionActionDialog.close === 'function' && sessionActionDialog.open) {
+          sessionActionDialog.close();
+        } else {
+          sessionActionDialog.removeAttribute('open');
+          sessionActionDialog.dispatchEvent(new Event('close'));
+        }
+      }
+
+      function openSessionActionDialog(session) {
+        selectedSessionId = session.id;
+        lastFocusedBeforeSessionAction = document.activeElement;
+        const name = getSessionName(session);
+        const isResumed = resumedSession?.sessionId === session.id;
+        const isInProgress = session.endedAt === null || session.endedAt === undefined;
+        const isActive = isResumed || (isInProgress && treadmillRunning && activeSessionId === session.id);
+        sessionNameInput.value = name;
+        sessionRenameForm.hidden = true;
+        sessionRenameButton.hidden = false;
+        sessionRenameButton.setAttribute('aria-label', 'Rename session');
+        sessionRenameButton.title = 'Rename session';
+        sessionPlayButton.textContent = isActive ? '■' : '▶';
+        sessionPlayButton.setAttribute('aria-label', isActive ? 'Stop active session' : 'Play or resume session');
+        sessionPlayButton.title = isActive ? 'Stop active session' : 'Play or resume';
+        sessionDeleteButton.setAttribute('aria-label', `Delete session${name ? ` “${name}”` : ''}`);
+        sessionDeleteButton.title = 'Delete session';
+        sessionPlayButton.disabled = false;
+        if (typeof sessionActionDialog.showModal === 'function') {
+          sessionActionDialog.showModal();
+        } else {
+          sessionActionDialog.setAttribute('open', '');
+        }
+        sessionRenameButton.focus();
+      }
+
+      sessionRenameForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const saved = selectedSessionId !== null && renameSession(selectedSessionId, sessionNameInput.value);
+        sessionNameInput.setCustomValidity(saved ? '' : 'Unable to save this session name. Please try again.');
+        if (saved) {
+          sessionRenameForm.hidden = true;
+          sessionRenameButton.hidden = false;
+          sessionRenameButton.setAttribute('aria-label', 'Rename session');
+          sessionRenameButton.title = 'Rename session';
+          sessionRenameButton.focus();
+        } else {
+          sessionNameInput.reportValidity();
+          sessionNameInput.focus();
+        }
+      });
+      sessionNameInput.addEventListener('input', () => sessionNameInput.setCustomValidity(''));
+      clearSessionNameButton.addEventListener('click', () => {
+        sessionNameInput.value = '';
+        if (selectedSessionId !== null) renameSession(selectedSessionId, '');
+        sessionNameInput.focus();
+      });
+      sessionRenameButton.addEventListener('click', () => {
+        sessionRenameForm.hidden = !sessionRenameForm.hidden;
+        sessionRenameButton.hidden = !sessionRenameForm.hidden;
+        sessionRenameButton.setAttribute('aria-label', sessionRenameForm.hidden ? 'Rename session' : 'Hide rename editor');
+        sessionRenameButton.title = sessionRenameForm.hidden ? 'Rename session' : 'Hide rename editor';
+        if (sessionRenameForm.hidden) sessionRenameButton.focus();
+        else sessionNameInput.focus();
+      });
+      sessionPlayButton.addEventListener('click', () => {
+        const session = sessionHistory.find((item) => item.id === selectedSessionId);
+        if (!session) return closeSessionActionDialog();
+        const isActive = resumedSession?.sessionId === session.id
+          || (session.endedAt === null || session.endedAt === undefined) && treadmillRunning && activeSessionId === session.id;
+        if (isActive) {
+          closeSessionActionDialog();
+          stop().catch((error) => {
+            console.error('Resume stop command failed:', error);
+            setControlsEnabled(false);
+            log(error.message, 'error');
+          });
           return;
         }
-        const deleteButton = event.target.closest('.session-delete-button');
-        if (deleteButton) {
-          const session = sessionHistory.find((item) => item.id === deleteButton.dataset.sessionId);
-          if (session) openHistoryConfirmation('delete', session.id, formatLocalDateTime(session.startedAt));
+        closeSessionActionDialog();
+        if (session.endedAt === null || session.endedAt === undefined) {
+          start().catch((error) => {
+            console.error('Session start command failed:', error);
+            setControlsEnabled(false);
+            log(error.message, 'error');
+          });
+        } else {
+          resumeSession(session.id);
         }
+      });
+      sessionDeleteButton.addEventListener('click', () => {
+        const session = sessionHistory.find((item) => item.id === selectedSessionId);
+        if (!session) return closeSessionActionDialog();
+        closeSessionActionDialog();
+        openHistoryConfirmation('delete', session.id, formatLocalDateTime(session.startedAt));
+      });
+      closeSessionActionDialogButton.addEventListener('click', () => closeSessionActionDialog());
+      sessionActionDialog.addEventListener('pointerdown', (event) => {
+        if (event.target === sessionActionDialog) closeSessionActionDialog();
+      });
+      sessionActionDialog.addEventListener('close', () => {
+        const focusTarget = lastFocusedBeforeSessionAction?.isConnected
+          ? lastFocusedBeforeSessionAction
+          : sessionHistory.find((item) => item.id === selectedSessionId)
+            ? [...document.querySelectorAll('.session-action-button')].find((button) => button.dataset.sessionId === selectedSessionId)
+            : null;
+        selectedSessionId = null;
+        lastFocusedBeforeSessionAction = null;
+        if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+      });
+      ui('sessionHistoryContent').addEventListener('click', (event) => {
+        const actionButton = event.target.closest('.session-action-button');
+        if (!actionButton) return;
+        const session = sessionHistory.find((item) => item.id === actionButton.dataset.sessionId);
+        if (session) openSessionActionDialog(session);
       });
     })();
     </script>
