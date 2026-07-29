@@ -734,8 +734,6 @@
             <div class="connection">
                 <button id="btnConnect" type="button">Connect</button>
                 <button id="btnDisconnect" type="button" hidden>Disconnect</button>
-                <span class="device-name">Device: <span id="deviceName">—</span></span>
-                <span id="status" class="status-badge">idle</span>
             </div>
         </header>
 
@@ -826,13 +824,14 @@
       // ======= Assigned Numbers (16-bit UUIDs) =======
       const FTMS_SERVICE                = 0x1826; // Fitness Machine Service
       const SESSION_HISTORY_KEY         = 'treadmillSessionHistory';
+      const LEGACY_TARGET_SPEED_KEY     = 'targetSpeed';
+      const DEVICE_TARGET_SPEED_PREFIX  = 'treadmillControl:targetSpeed:';
       const CH_TREADMILL_DATA           = 0x2ACD; // notifications with speed, etc.
       const CH_SUPPORTED_SPEED_RANGE    = 0x2AD4; // min, max, increment (0.01 km/h)
       const CH_FITNESS_MACHINE_CONTROL  = 0x2AD9; // write + indicate responses
 
       // Fitness Machine Control Point opcodes (per spec)
       const OP_REQUEST_CONTROL = 0x00;
-      const OP_RESET           = 0x01;
       const OP_SET_TARGET_SPEED= 0x02; // parameter: uint16 of 0.01 km/h
       const OP_START_OR_RESUME = 0x07;
       const OP_STOP_OR_PAUSE   = 0x08;
@@ -904,10 +903,9 @@
       }
 
       function formatLocalDateTime(timestamp) {
-        return new Intl.DateTimeFormat(undefined, {
-          dateStyle: 'medium',
-          timeStyle: 'short'
-        }).format(new Date(timestamp));
+        const date = new Date(timestamp);
+        const pad = (value) => value.toString().padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
       }
 
       function formatDistance(distance) {
@@ -1119,8 +1117,6 @@
         el.scrollTop = el.scrollHeight;
         el.hidden = false;
         ui('operationalStatus').textContent = m;
-        ui('status').textContent = level || 'connected';
-        ui('status').className = 'status-badge ' + (level === 'error' ? 'status-error' : level === 'warn' ? 'status-warn' : 'status-ok');
       };
 
       let device, server, ftms;
@@ -1150,16 +1146,49 @@
       let pendingResumeSessionId = null;
       let sessionHistory = loadSessionHistory();
 
-      // Load target speed from localStorage
-      let savedTargetSpeed = localStorage.getItem('targetSpeed');
-      if (savedTargetSpeed) {
-        targetKph = parseFloat(savedTargetSpeed);
-      }
+      // Load the legacy target speed as a fallback until a device is connected.
+      const savedTargetSpeed = loadStoredTargetSpeed(LEGACY_TARGET_SPEED_KEY);
+      if (savedTargetSpeed !== null) targetKph = savedTargetSpeed;
       updateTargetDisplay();
       resumeStoredSession();
 
       function updateTargetDisplay() {
         ui('target').textContent = targetKph.toFixed(1);
+      }
+
+      function getDeviceTargetSpeedKey() {
+        const deviceId = device && typeof device.id === 'string' ? device.id.trim() : '';
+        return deviceId ? `${DEVICE_TARGET_SPEED_PREFIX}${encodeURIComponent(deviceId)}` : null;
+      }
+
+      function loadStoredTargetSpeed(key) {
+        if (!key) return null;
+        try {
+          const value = Number.parseFloat(localStorage.getItem(key));
+          return Number.isFinite(value) && value >= 0 ? value : null;
+        } catch (error) {
+          console.warn('Unable to load saved target speed:', error);
+          return null;
+        }
+      }
+
+      function saveTargetSpeedForDevice(speedKph) {
+        const key = getDeviceTargetSpeedKey();
+        if (!key || !Number.isFinite(speedKph) || speedKph < 0) return;
+        try {
+          localStorage.setItem(key, String(speedKph));
+        } catch (error) {
+          console.warn('Unable to save device target speed:', error);
+        }
+      }
+
+      function saveLegacyTargetSpeed(speedKph) {
+        if (!Number.isFinite(speedKph) || speedKph < 0) return;
+        try {
+          localStorage.setItem(LEGACY_TARGET_SPEED_KEY, String(speedKph));
+        } catch (error) {
+          console.warn('Unable to save target speed:', error);
+        }
       }
 
       function clampTarget() {
@@ -1262,8 +1291,6 @@
           optionalServices: [FTMS_SERVICE]
         });
 
-        ui('deviceName').textContent = device.name || '(unnamed)';
-
         device.addEventListener('gattserverdisconnected', onDisconnected);
 
         server = await device.gatt.connect();
@@ -1314,6 +1341,7 @@
           ui('step').textContent  = '—';
         }
 
+        await restoreStoredTargetSpeed();
         setControlsEnabled(true);
         resumeStoredSession();
         log('Connected successfully');
@@ -1347,8 +1375,6 @@
         setSlowestActive(false);
         log('Disconnected');
         setControlsEnabled(false);
-        ui('status').textContent = 'disconnected';
-        ui('status').className = 'status-badge status-error';
       }
 
       function setControlsEnabled(enabled) {
@@ -1475,6 +1501,29 @@
         return transaction;
       }
 
+      async function writeTargetSpeedCommand(value, { persist = true } = {}, onTransactionStart = null) {
+        const result = await writeControl(OP_SET_TARGET_SPEED, value, onTransactionStart);
+        if (persist && !result.cancelled) saveTargetSpeedForDevice(value / 100);
+        return result;
+      }
+
+      async function restoreStoredTargetSpeed() {
+        const storedSpeed = loadStoredTargetSpeed(getDeviceTargetSpeedKey());
+        if (storedSpeed === null) return;
+
+        targetKph = Number.isFinite(maxKph) && maxKph > minKph
+          ? Math.max(minKph, Math.min(maxKph, storedSpeed))
+          : storedSpeed;
+        if (stepKph > 0) clampTarget();
+        else updateTargetDisplay();
+        try {
+          await writeTargetSpeedCommand(Math.round(targetKph * 100), { persist: false });
+          log(`Restored target speed at ${targetKph.toFixed(1)} km/h`);
+        } catch (error) {
+          log(`Saved target speed could not be restored: ${error.message}`, 'warn');
+        }
+      }
+
       function cancelTargetSpeedThrottle() {
         targetSpeedRequestGeneration += 1;
         if (targetSpeedThrottleTimer !== null) {
@@ -1501,7 +1550,7 @@
         targetSpeedCommandActive = true;
         const requestedSpeed = targetKph;
         const requestGeneration = targetSpeedRequestGeneration;
-        writeControl(OP_SET_TARGET_SPEED, Math.round(requestedSpeed * 100), async () => {
+        writeTargetSpeedCommand(Math.round(requestedSpeed * 100), { persist: true }, async () => {
           if (!treadmillRunning || requestGeneration !== targetSpeedRequestGeneration) return false;
           const delay = Math.max(0, lastTargetSpeedCommandAt + TARGET_SPEED_THROTTLE_MS - Date.now());
           if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
@@ -1543,7 +1592,7 @@
     
             const initialSpeed = 1.0;
             const value = Math.round(initialSpeed * 100);
-            await writeControl(OP_SET_TARGET_SPEED, value);
+            await writeTargetSpeedCommand(value, { persist: false });
             log(`Initial speed target confirmed at 1.0 km/h. Waiting ${RAMP_UP_DELAY_MS / 1000}s for ramp-up...`);
 
             // Wait for the treadmill to ramp up before setting the final target speed
@@ -1551,7 +1600,7 @@
                 try {
                     if (startRampGeneration !== rampUpGeneration || !treadmillRunning || slowestActive) return;
                     const targetValue = Math.round(targetKph * 100);
-                    await writeControl(OP_SET_TARGET_SPEED, targetValue);
+                    await writeTargetSpeedCommand(targetValue);
                     log(`Target speed confirmed at ${targetKph.toFixed(1)} km/h`);
                 } catch (e) {
                     console.error('Error setting target speed after delay:', e);
@@ -1581,7 +1630,7 @@
         setSlowestActive(nextState);
 
         try {
-          await writeControl(OP_SET_TARGET_SPEED, Math.round(requestedSpeed * 100));
+          await writeTargetSpeedCommand(Math.round(requestedSpeed * 100));
           log(nextState
             ? `Slowest speed confirmed at ${minKph.toFixed(1)} km/h`
             : `Normal target speed confirmed at ${targetKph.toFixed(1)} km/h`);
@@ -1609,7 +1658,8 @@
       function adjustTargetSpeed(delta) {
         targetKph = +(targetKph + delta).toFixed(1);
         clampTarget();
-        localStorage.setItem('targetSpeed', targetKph);
+        saveLegacyTargetSpeed(targetKph);
+        saveTargetSpeedForDevice(targetKph);
         if (treadmillRunning) {
           rampUpGeneration += 1;
           clearTimeout(rampUpTimeout);
