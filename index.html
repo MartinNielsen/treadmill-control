@@ -292,6 +292,32 @@
             outline-offset: 3px;
             box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.7);
         }
+        .session-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .session-resume-button {
+            padding: 0.35rem;
+            min-width: 2.2rem;
+            font-size: 1rem;
+            line-height: 1;
+            background: var(--green);
+            border-color: var(--green);
+            color: #07150d;
+        }
+        .session-resume-button.is-active {
+            background: var(--green);
+            border-color: var(--green);
+            color: #07150d;
+        }
+        .session-extra {
+            display: block;
+            margin-top: 0.2rem;
+            color: var(--green);
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
         .destructive-button {
             background: rgba(185, 28, 28, 0.8);
             border-color: rgba(254, 202, 202, 0.7);
@@ -666,6 +692,10 @@
             padding: 0.35rem;
             background: var(--surface-strong);
         }
+        .session-resume-button {
+            min-height: 48px;
+            min-width: 48px;
+        }
         dialog {
             border-color: var(--border);
             background: var(--surface-strong);
@@ -884,6 +914,21 @@
         return isValidDistance(distance) ? `${Math.round(distance)} m` : 'Unavailable';
       }
 
+      function getLatestCompletedSession() {
+        return [...sessionHistory].reverse().find((session) => session.endedAt !== null && session.endedAt !== undefined) || null;
+      }
+
+      function getResumedSession() {
+        if (!resumedSession) return null;
+        return sessionHistory.find((session) => session.id === resumedSession.sessionId) || null;
+      }
+
+      function calculateIncrement(currentValue, baselineValue, fallbackValue = 0) {
+        if (!Number.isFinite(currentValue)) return fallbackValue;
+        if (!Number.isFinite(baselineValue)) return Math.max(0, currentValue);
+        return currentValue >= baselineValue ? currentValue - baselineValue : Math.max(0, currentValue);
+      }
+
       function getInProgressSession() {
         if (activeSessionId !== null) {
           const active = sessionHistory.find((session) => session.id === activeSessionId && !session.endedAt);
@@ -894,15 +939,27 @@
 
       function renderSessionHistory() {
         const content = ui('sessionHistoryContent');
+        ui('btnStart').disabled = !controlsAvailable || !!resumedSession;
         if (!sessionHistory.length) {
           content.innerHTML = '<p class="session-history-empty">No walking sessions recorded yet.</p>';
           return;
         }
 
+        const latestCompletedId = getLatestCompletedSession()?.id;
         const rows = [...sessionHistory].reverse().map((session) => {
-          const duration = session.endedAt ? formatDuration(session.durationSeconds) : 'In progress';
-          const distance = session.endedAt ? formatDistance(session.endDistance) : formatDistance(session.latestDistance);
-          return `<tr><td>${formatLocalDateTime(session.startedAt)}</td><td>${duration}</td><td>${distance}</td><td><button class="session-delete-button" type="button" data-session-id="${session.id}" aria-label="Delete session">🗑</button></td></tr>`;
+          const isResumed = resumedSession?.sessionId === session.id;
+          const duration = session.endedAt !== null && session.endedAt !== undefined
+            ? formatDuration(session.durationSeconds)
+            : 'In progress';
+          const distance = session.endedAt !== null && session.endedAt !== undefined
+            ? formatDistance(session.endDistance)
+            : formatDistance(session.latestDistance);
+          const extraDuration = isResumed ? `<span class="session-extra">+ ${formatDuration(resumedSession.extraDurationSeconds)}</span>` : '';
+          const extraDistance = isResumed ? `<span class="session-extra">+ ${formatDistance(resumedSession.extraDistanceMeters)}</span>` : '';
+          const resumeButton = session.id === latestCompletedId || isResumed
+            ? `<button class="session-resume-button${isResumed ? ' is-active' : ''}" type="button" data-session-id="${session.id}" aria-label="${isResumed ? 'Stop resumed session' : 'Resume session'}">${isResumed ? '■' : '▶'}</button>`
+            : '';
+          return `<tr><td>${formatLocalDateTime(session.startedAt)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}</td><td><div class="session-actions">${resumeButton}<button class="session-delete-button" type="button" data-session-id="${session.id}" aria-label="Delete session">🗑</button></div></td></tr>`;
         }).join('');
 
         content.innerHTML = `<div class="session-history-table-wrap">
@@ -919,6 +976,23 @@
       }
 
       function updateInProgressSessionMetrics() {
+        if (resumedSession) {
+          const session = getResumedSession();
+          if (!session) return;
+          const elapsedFallback = Math.max(0, (Date.now() - resumedSession.startedAt) / 1000);
+          resumedSession.extraDistanceMeters = calculateIncrement(
+            isValidDistance(latestTotalDistance) ? latestTotalDistance : NaN,
+            resumedSession.baselineDistance,
+            resumedSession.extraDistanceMeters
+          );
+          resumedSession.extraDurationSeconds = calculateIncrement(
+            isValidElapsedTime(latestElapsedTime) ? latestElapsedTime : NaN,
+            resumedSession.baselineElapsedTime,
+            elapsedFallback
+          );
+          renderSessionHistory();
+          return;
+        }
         const session = getInProgressSession();
         if (!session) return;
         if (isValidDistance(latestTotalDistance)) session.latestDistance = latestTotalDistance;
@@ -928,6 +1002,23 @@
       }
 
       function beginOrResumeSession() {
+        if (pendingResumeSessionId !== null) {
+          const session = sessionHistory.find((item) => item.id === pendingResumeSessionId);
+          pendingResumeSessionId = null;
+          if (session && session.endedAt !== null && session.endedAt !== undefined) {
+            resumedSession = {
+              sessionId: session.id,
+              startedAt: Date.now(),
+              baselineDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : session.endDistance,
+              baselineElapsedTime: isValidElapsedTime(latestElapsedTime) ? latestElapsedTime : session.durationSeconds,
+              extraDistanceMeters: 0,
+              extraDurationSeconds: 0
+            };
+            activeSessionId = session.id;
+            renderSessionHistory();
+            return;
+          }
+        }
         let session = getInProgressSession();
         const isNewSession = !session;
         if (!session) {
@@ -958,7 +1049,36 @@
         renderSessionHistory();
       }
 
+      function resumeSession(sessionId) {
+        const session = getLatestCompletedSession();
+        if (!controlsAvailable || treadmillRunning || !session || session.id !== sessionId) return;
+        pendingResumeSessionId = session.id;
+        start().catch((error) => {
+          pendingResumeSessionId = null;
+          console.error('Resume command failed:', error);
+          setControlsEnabled(false);
+          log(error.message, 'error');
+        });
+      }
+
       function completeSession() {
+        if (resumedSession) {
+          const session = getResumedSession();
+          if (!session) return;
+          updateInProgressSessionMetrics();
+          const extraDuration = resumedSession.extraDurationSeconds;
+          const extraDistance = resumedSession.extraDistanceMeters;
+          session.durationSeconds = (Number.isFinite(session.durationSeconds) ? session.durationSeconds : 0) + extraDuration;
+          session.endDistance = isValidDistance(session.endDistance) && Number.isFinite(extraDistance)
+            ? session.endDistance + extraDistance
+            : isValidDistance(latestTotalDistance) ? latestTotalDistance : session.endDistance;
+          session.endedAt = Date.now();
+          resumedSession = null;
+          activeSessionId = null;
+          saveSessionHistory();
+          renderSessionHistory();
+          return;
+        }
         const session = getInProgressSession();
         if (!session) return;
 
@@ -978,6 +1098,8 @@
       function deleteSession(sessionId) {
         sessionHistory = sessionHistory.filter((session) => session.id !== sessionId);
         if (activeSessionId === sessionId) activeSessionId = null;
+        if (resumedSession?.sessionId === sessionId) resumedSession = null;
+        if (pendingResumeSessionId === sessionId) pendingResumeSessionId = null;
         saveSessionHistory();
         renderSessionHistory();
       }
@@ -985,6 +1107,8 @@
       function clearAllHistory() {
         sessionHistory = [];
         activeSessionId = null;
+        resumedSession = null;
+        pendingResumeSessionId = null;
         saveSessionHistory();
         renderSessionHistory();
       }
@@ -1022,6 +1146,8 @@
       let latestTotalDistance = null;
       let latestElapsedTime = null;
       let activeSessionId = null;
+      let resumedSession = null;
+      let pendingResumeSessionId = null;
       let sessionHistory = loadSessionHistory();
 
       // Load target speed from localStorage
@@ -1599,6 +1725,19 @@
         lastFocusedBeforeClearHistory = null;
       });
       ui('sessionHistoryContent').addEventListener('click', (event) => {
+        const resumeButton = event.target.closest('.session-resume-button');
+        if (resumeButton) {
+          if (resumeButton.classList.contains('is-active')) {
+            stop().catch((error) => {
+              console.error('Resume stop command failed:', error);
+              setControlsEnabled(false);
+              log(error.message, 'error');
+            });
+          } else {
+            resumeSession(resumeButton.dataset.sessionId);
+          }
+          return;
+        }
         const deleteButton = event.target.closest('.session-delete-button');
         if (deleteButton) {
           const session = sessionHistory.find((item) => item.id === deleteButton.dataset.sessionId);
