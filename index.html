@@ -266,6 +266,18 @@
             font-weight: 600;
             opacity: 0.8;
         }
+        .session-history th:first-child,
+        .session-history td:first-child {
+            width: 34%;
+        }
+        .session-history th:nth-child(2),
+        .session-history td:nth-child(2) {
+            width: 21%;
+        }
+        .session-history th:nth-child(3),
+        .session-history td:nth-child(3) {
+            width: 24%;
+        }
         .session-history tbody tr:last-child td {
             border-bottom: 0;
         }
@@ -276,6 +288,10 @@
             border-radius: 10px;
             font-size: 0.9rem;
             opacity: 0.8;
+        }
+        .session-start-date,
+        .session-start-time {
+            white-space: nowrap;
         }
         .session-history .secondary-button {
             padding: 0.5rem 0.75rem;
@@ -905,7 +921,15 @@
       function formatLocalDateTime(timestamp) {
         const date = new Date(timestamp);
         const pad = (value) => value.toString().padStart(2, '0');
-        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+        const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        return `${datePart} ${timePart}`;
+      }
+
+      function formatSessionStartedAt(timestamp) {
+        const formatted = formatLocalDateTime(timestamp);
+        const [datePart, timePart] = formatted.split(' ');
+        return `<span class="session-start-date">${datePart}</span><br><span class="session-start-time">${timePart}</span>`;
       }
 
       function formatDistance(distance) {
@@ -957,7 +981,7 @@
           const resumeButton = session.id === latestCompletedId || isResumed
             ? `<button class="session-resume-button${isResumed ? ' is-active' : ''}" type="button" data-session-id="${session.id}" aria-label="${isResumed ? 'Stop resumed session' : 'Resume session'}">${isResumed ? '■' : '▶'}</button>`
             : '';
-          return `<tr><td>${formatLocalDateTime(session.startedAt)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}</td><td><div class="session-actions">${resumeButton}<button class="session-delete-button" type="button" data-session-id="${session.id}" aria-label="Delete session">🗑</button></div></td></tr>`;
+          return `<tr><td>${formatSessionStartedAt(session.startedAt)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}</td><td><div class="session-actions">${resumeButton}<button class="session-delete-button" type="button" data-session-id="${session.id}" aria-label="Delete session">🗑</button></div></td></tr>`;
         }).join('');
 
         content.innerHTML = `<div class="session-history-table-wrap">
