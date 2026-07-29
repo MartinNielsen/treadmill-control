@@ -1515,6 +1515,7 @@
         ui('btnConnect').hidden = enabled;
         ui('btnDisconnect').hidden = !enabled;
         updateSlowestButton();
+        updateSessionActionAvailability();
       }
 
       function onTreadmillData(event) {
@@ -1863,6 +1864,22 @@
       let selectedSessionId = null;
       let lastFocusedBeforeSessionAction = null;
 
+      function updateSessionActionAvailability() {
+        if (!sessionPlayButton) return;
+        const session = sessionHistory.find((item) => item.id === selectedSessionId);
+        const isActive = session && (resumedSession?.sessionId === session.id
+          || (session.endedAt === null || session.endedAt === undefined)
+            && treadmillRunning && activeSessionId === session.id);
+        const actionLabel = isActive ? 'Stop active session' : 'Play or resume session';
+        const available = controlsAvailable;
+        sessionPlayButton.disabled = !available;
+        sessionPlayButton.setAttribute('aria-disabled', String(!available));
+        sessionPlayButton.setAttribute('aria-label', available
+          ? actionLabel
+          : `${actionLabel}; connect to a treadmill first`);
+        sessionPlayButton.title = available ? actionLabel : 'Connect to a treadmill first';
+      }
+
       function closeClearHistoryDialog(value = '') {
         if (typeof clearHistoryDialog.close === 'function' && clearHistoryDialog.open) {
           clearHistoryDialog.close(value);
@@ -1938,11 +1955,9 @@
         sessionRenameButton.setAttribute('aria-label', 'Rename session');
         sessionRenameButton.title = 'Rename session';
         sessionPlayButton.textContent = isActive ? '■' : '▶';
-        sessionPlayButton.setAttribute('aria-label', isActive ? 'Stop active session' : 'Play or resume session');
-        sessionPlayButton.title = isActive ? 'Stop active session' : 'Play or resume';
         sessionDeleteButton.setAttribute('aria-label', `Delete session${name ? ` “${name}”` : ''}`);
         sessionDeleteButton.title = 'Delete session';
-        sessionPlayButton.disabled = false;
+        updateSessionActionAvailability();
         if (typeof sessionActionDialog.showModal === 'function') {
           sessionActionDialog.showModal();
         } else {
