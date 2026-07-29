@@ -2,6 +2,7 @@
   "name": "Treadmill Control",
   "short_name": "Treadmill",
   "description": "Bluetooth controller for FTMS-enabled treadmills",
+  "id": "./",
   "start_url": ".",
   "display": "standalone",
   "orientation": "portrait",

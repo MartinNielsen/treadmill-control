@@ -162,6 +162,7 @@
             opacity: 0.8;
         }
         .log {
+            margin-top: 3rem;
             background: rgba(0, 0, 0, 0.2);
             border-radius: 8px;
             padding: 1rem;
@@ -223,6 +224,115 @@
             font-weight: 400;
             opacity: 0.75;
         }
+        .session-history {
+            margin-top: 2rem;
+        }
+        .session-history-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.75rem;
+        }
+        .session-history h2 {
+            font-size: 1.1rem;
+            margin: 0;
+        }
+        .session-history-note {
+            margin: 0 0 0.75rem;
+            font-size: 0.85rem;
+            opacity: 0.78;
+        }
+        .session-history-table-wrap {
+            overflow-x: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+        .session-history table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 360px;
+            background: rgba(0, 0, 0, 0.08);
+        }
+        .session-history th,
+        .session-history td {
+            padding: 0.7rem 0.8rem;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.85rem;
+        }
+        .session-history th {
+            font-weight: 600;
+            opacity: 0.8;
+        }
+        .session-history tbody tr:last-child td {
+            border-bottom: 0;
+        }
+        .session-history-empty {
+            margin: 0;
+            padding: 1rem;
+            border: 1px dashed rgba(255, 255, 255, 0.25);
+            border-radius: 10px;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        .session-history .secondary-button {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+        }
+        .session-delete-button {
+            padding: 0.35rem 0.55rem;
+            min-width: 2.2rem;
+            font-size: 1rem;
+            line-height: 1;
+        }
+        .session-delete-button:focus-visible {
+            outline: 3px solid #ffffff;
+            outline-offset: 3px;
+            box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.7);
+        }
+        .destructive-button {
+            background: rgba(185, 28, 28, 0.8);
+            border-color: rgba(254, 202, 202, 0.7);
+        }
+        dialog {
+            max-width: min(28rem, calc(100vw - 2rem));
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 14px;
+            padding: 1.25rem;
+            background: #4c347d;
+            color: white;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+        }
+        dialog::backdrop {
+            background: rgba(15, 23, 42, 0.72);
+        }
+        dialog h2 {
+            margin: 0 0 0.6rem;
+            font-size: 1.2rem;
+        }
+        dialog p {
+            margin: 0 0 1.2rem;
+            line-height: 1.45;
+        }
+        .dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
     </style>
 </head>
 <body>
@@ -252,8 +362,10 @@
                     <span class="stat-unit">km/h</span>
                 </div>
                 <div class="speed-controls" style="margin-top: 1rem; justify-content: center; display: flex; gap: 0.5rem;">
-                    <button id="btnMinus">➖ −0.5</button>
-                    <button id="btnPlus">➕ +0.5</button>
+                    <button id="btnMinusSmall" type="button" aria-label="Decrease target speed by 0.1 km/h">−0.1</button>
+                    <button id="btnMinus" type="button" aria-label="Decrease target speed by 0.5 km/h">−0.5</button>
+                    <button id="btnPlus" type="button" aria-label="Increase target speed by 0.5 km/h">+0.5</button>
+                    <button id="btnPlusSmall" type="button" aria-label="Increase target speed by 0.1 km/h">+0.1</button>
                 </div>
             </div>
             <div class="stat-card">
@@ -271,8 +383,6 @@
             <button id="btnStop" disabled>⏸ Stop</button>
         </div>
 
-        <div class="log" id="log"></div>
-
         <section id="liveMetrics" class="live-metrics" aria-labelledby="liveMetricsTitle">
             <h2 id="liveMetricsTitle">Live FTMS metrics</h2>
             <div class="metric-grid">
@@ -287,12 +397,43 @@
             </div>
         </section>
 
+        <section class="session-history" aria-labelledby="sessionHistoryTitle">
+            <div class="session-history-header">
+                <h2 id="sessionHistoryTitle">Walking session history</h2>
+                <button id="btnClearHistory" class="secondary-button" type="button">Clear history</button>
+            </div>
+            <p class="session-history-note">Stored only in this browser on this device. An unfinished session stays here if Bluetooth disconnects.</p>
+            <div id="sessionHistoryContent">
+                <p class="session-history-empty">No walking sessions recorded yet.</p>
+            </div>
+        </section>
+
+        <dialog id="clearHistoryDialog" aria-labelledby="clearHistoryDialogTitle" aria-describedby="clearHistoryDialogDescription">
+            <h2 id="clearHistoryDialogTitle">Clear walking history?</h2>
+            <p id="clearHistoryDialogDescription">This permanently deletes all saved walking sessions from this browser on this device.</p>
+            <form method="dialog" class="dialog-actions">
+                <button id="cancelClearHistory" type="submit" value="cancel">Cancel</button>
+                <button id="confirmClearHistory" class="destructive-button" type="submit" value="confirm">Clear history</button>
+            </form>
+        </dialog>
+
+        <div class="log" id="log"></div>
+
     </div>
 
     <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+          .then((registration) => registration.update())
+          .catch((error) => console.warn('App update check unavailable:', error));
+      });
+    }
+
     (async () => {
       // ======= Assigned Numbers (16-bit UUIDs) =======
       const FTMS_SERVICE                = 0x1826; // Fitness Machine Service
+      const SESSION_HISTORY_KEY         = 'treadmillSessionHistory';
       const CH_TREADMILL_DATA           = 0x2ACD; // notifications with speed, etc.
       const CH_SUPPORTED_SPEED_RANGE    = 0x2AD4; // min, max, increment (0.01 km/h)
       const CH_FITNESS_MACHINE_CONTROL  = 0x2AD9; // write + indicate responses
@@ -337,10 +478,153 @@
       }
 
       function formatDuration(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) return 'Unavailable';
         const wholeSeconds = Math.round(seconds);
         const minutes = Math.floor(wholeSeconds / 60);
         const remainder = wholeSeconds % 60;
         return `${minutes}:${remainder.toString().padStart(2, '0')}`;
+      }
+
+      function isValidDistance(value) {
+        return Number.isFinite(value) && value >= 0 && value !== 0xFFFFFF;
+      }
+
+      function isValidElapsedTime(value) {
+        return Number.isFinite(value) && value >= 0 && value !== 0xFFFF;
+      }
+
+      function loadSessionHistory() {
+        try {
+          const stored = JSON.parse(localStorage.getItem(SESSION_HISTORY_KEY) || '[]');
+          return Array.isArray(stored) ? stored.filter((session) => session && Number.isFinite(session.startedAt)) : [];
+        } catch (error) {
+          console.warn('Unable to load session history:', error);
+          return [];
+        }
+      }
+
+      function saveSessionHistory() {
+        try {
+          localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(sessionHistory));
+        } catch (error) {
+          console.warn('Unable to save session history:', error);
+        }
+      }
+
+      function formatLocalDateTime(timestamp) {
+        return new Intl.DateTimeFormat(undefined, {
+          dateStyle: 'medium',
+          timeStyle: 'short'
+        }).format(new Date(timestamp));
+      }
+
+      function formatDistance(distance) {
+        return isValidDistance(distance) ? `${Math.round(distance)} m` : 'Unavailable';
+      }
+
+      function getInProgressSession() {
+        if (activeSessionId !== null) {
+          const active = sessionHistory.find((session) => session.id === activeSessionId && !session.endedAt);
+          if (active) return active;
+        }
+        return [...sessionHistory].reverse().find((session) => !session.endedAt) || null;
+      }
+
+      function renderSessionHistory() {
+        const content = ui('sessionHistoryContent');
+        if (!sessionHistory.length) {
+          content.innerHTML = '<p class="session-history-empty">No walking sessions recorded yet.</p>';
+          return;
+        }
+
+        const rows = [...sessionHistory].reverse().map((session) => {
+          const duration = session.endedAt ? formatDuration(session.durationSeconds) : 'In progress';
+          const distance = session.endedAt ? formatDistance(session.endDistance) : formatDistance(session.latestDistance);
+          return `<tr><td>${formatLocalDateTime(session.startedAt)}</td><td>${duration}</td><td>${distance}</td><td><button class="session-delete-button" type="button" data-session-id="${session.id}" aria-label="Delete session">🗑</button></td></tr>`;
+        }).join('');
+
+        content.innerHTML = `<div class="session-history-table-wrap">
+            <table>
+                <caption class="sr-only">Walking sessions</caption>
+                <thead><tr><th scope="col">Started</th><th scope="col">Duration</th><th scope="col">End distance</th><th scope="col">Actions</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+        content.querySelectorAll('.session-delete-button').forEach((button) => {
+          const session = sessionHistory.find((item) => item.id === button.dataset.sessionId);
+          if (session) button.setAttribute('aria-label', `Delete session started ${formatLocalDateTime(session.startedAt)}`);
+        });
+      }
+
+      function updateInProgressSessionMetrics() {
+        const session = getInProgressSession();
+        if (!session) return;
+        if (isValidDistance(latestTotalDistance)) session.latestDistance = latestTotalDistance;
+        if (isValidElapsedTime(latestElapsedTime)) session.latestElapsedTime = latestElapsedTime;
+        saveSessionHistory();
+        renderSessionHistory();
+      }
+
+      function beginOrResumeSession() {
+        let session = getInProgressSession();
+        const isNewSession = !session;
+        if (!session) {
+          session = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            startedAt: Date.now(),
+            endedAt: null,
+            startDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : null,
+            latestDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : null,
+            latestElapsedTime: isValidElapsedTime(latestElapsedTime) ? latestElapsedTime : null,
+            endDistance: null,
+            durationSeconds: null
+          };
+          sessionHistory.push(session);
+        }
+        activeSessionId = session.id;
+        updateInProgressSessionMetrics();
+        if (isNewSession) {
+          session.latestElapsedTime = null;
+          saveSessionHistory();
+          renderSessionHistory();
+        }
+      }
+
+      function resumeStoredSession() {
+        const session = getInProgressSession();
+        if (session) activeSessionId = session.id;
+        renderSessionHistory();
+      }
+
+      function completeSession() {
+        const session = getInProgressSession();
+        if (!session) return;
+
+        const endedAt = Date.now();
+        const endDistance = isValidDistance(latestTotalDistance) ? latestTotalDistance : session.latestDistance;
+        const deviceDuration = isValidElapsedTime(latestElapsedTime) ? latestElapsedTime : session.latestElapsedTime;
+        session.endedAt = endedAt;
+        session.endDistance = isValidDistance(endDistance) ? endDistance : null;
+        session.durationSeconds = isValidElapsedTime(deviceDuration)
+          ? deviceDuration
+          : Math.max(0, (endedAt - session.startedAt) / 1000);
+        saveSessionHistory();
+        renderSessionHistory();
+        activeSessionId = null;
+      }
+
+      function deleteSession(sessionId) {
+        sessionHistory = sessionHistory.filter((session) => session.id !== sessionId);
+        if (activeSessionId === sessionId) activeSessionId = null;
+        saveSessionHistory();
+        renderSessionHistory();
+      }
+
+      function clearAllHistory() {
+        sessionHistory = [];
+        activeSessionId = null;
+        saveSessionHistory();
+        renderSessionHistory();
       }
 
       const log = (m, level="") => {
@@ -357,6 +641,13 @@
       let minKph = 0, maxKph = 20, stepKph = 0.1; // defaults until we read Supported Speed Range
       let currentSpeedKph = 0.0;
       let rampUpTimeout;
+      let rampUpGeneration = 0;
+      const TARGET_SPEED_THROTTLE_MS = 500;
+      let targetSpeedThrottleTimer = null;
+      let targetSpeedCommandPending = false;
+      let targetSpeedCommandActive = false;
+      let targetSpeedRequestGeneration = 0;
+      let lastTargetSpeedCommandAt = -Infinity;
       let controlPointPending = null;
       let controlPointQueue = Promise.resolve();
       let controlsAvailable = false;
@@ -364,6 +655,10 @@
       let slowestActive = false;
       let slowestCommandPending = false;
       let speedRangeAvailable = false;
+      let latestTotalDistance = null;
+      let latestElapsedTime = null;
+      let activeSessionId = null;
+      let sessionHistory = loadSessionHistory();
 
       // Load target speed from localStorage
       let savedTargetSpeed = localStorage.getItem('targetSpeed');
@@ -371,6 +666,7 @@
         targetKph = parseFloat(savedTargetSpeed);
       }
       updateTargetDisplay();
+      resumeStoredSession();
 
       function updateTargetDisplay() {
         ui('target').textContent = targetKph.toFixed(1);
@@ -421,10 +717,12 @@
 
       function updateLiveMetrics(values) {
         if (Object.prototype.hasOwnProperty.call(values, 'totalDistance') && values.totalDistance !== 0xFFFFFF) {
+          latestTotalDistance = values.totalDistance;
           ui('metricTotalDistanceValue').textContent = values.totalDistance.toString();
           setMetricVisible('metricTotalDistance', true);
         }
         if (Object.prototype.hasOwnProperty.call(values, 'elapsedTime') && values.elapsedTime !== 0xFFFF) {
+          latestElapsedTime = values.elapsedTime;
           ui('metricElapsedTimeValue').textContent = formatDuration(values.elapsedTime);
           setMetricVisible('metricElapsedTime', true);
         }
@@ -434,9 +732,12 @@
           currentSpeedKph = values.instantaneousSpeed;
           setMetricVisible('metricInstantaneousSpeed', true);
         }
+        updateInProgressSessionMetrics();
       }
 
       function resetLiveMetrics() {
+        latestTotalDistance = null;
+        latestElapsedTime = null;
         ui('speed').textContent = '0.0';
         ui('metricTotalDistanceValue').textContent = '—';
         ui('metricElapsedTimeValue').textContent = '—';
@@ -521,6 +822,7 @@
         }
 
         setControlsEnabled(true);
+        resumeStoredSession();
         log('Connected successfully');
       }
 
@@ -543,6 +845,10 @@
       function onDisconnected() {
         console.warn('GATT server disconnected.');
         rejectPendingControlPoint(new Error('Fitness Machine Control Point disconnected before a response.'));
+        rampUpGeneration += 1;
+        clearTimeout(rampUpTimeout);
+        rampUpTimeout = null;
+        cancelTargetSpeedThrottle();
         treadmillRunning = false;
         speedRangeAvailable = false;
         setSlowestActive(false);
@@ -662,16 +968,77 @@
         }
       }
 
-      function writeControl(opcode, parameter = null) {
-        const transaction = controlPointQueue.then(() => sendControlPointCommand(opcode, parameter));
+      function writeControl(opcode, parameter = null, onTransactionStart = null) {
+        const transaction = controlPointQueue.then(async () => {
+          if (onTransactionStart) {
+            const shouldSend = await onTransactionStart();
+            if (shouldSend === false) return { cancelled: true };
+          } else if (opcode === OP_SET_TARGET_SPEED) {
+            lastTargetSpeedCommandAt = Date.now();
+          }
+          return sendControlPointCommand(opcode, parameter);
+        });
         controlPointQueue = transaction.catch(() => {});
         return transaction;
+      }
+
+      function cancelTargetSpeedThrottle() {
+        targetSpeedRequestGeneration += 1;
+        if (targetSpeedThrottleTimer !== null) {
+          clearTimeout(targetSpeedThrottleTimer);
+          targetSpeedThrottleTimer = null;
+        }
+        targetSpeedCommandPending = false;
+      }
+
+      function scheduleTargetSpeedCommand() {
+        if (!treadmillRunning || !targetSpeedCommandPending || targetSpeedCommandActive) return;
+        if (targetSpeedThrottleTimer !== null) return;
+
+        const delay = Math.max(0, lastTargetSpeedCommandAt + TARGET_SPEED_THROTTLE_MS - Date.now());
+        if (delay > 0) {
+          targetSpeedThrottleTimer = setTimeout(() => {
+            targetSpeedThrottleTimer = null;
+            scheduleTargetSpeedCommand();
+          }, delay);
+          return;
+        }
+
+        targetSpeedCommandPending = false;
+        targetSpeedCommandActive = true;
+        const requestedSpeed = targetKph;
+        const requestGeneration = targetSpeedRequestGeneration;
+        writeControl(OP_SET_TARGET_SPEED, Math.round(requestedSpeed * 100), async () => {
+          if (!treadmillRunning || requestGeneration !== targetSpeedRequestGeneration) return false;
+          const delay = Math.max(0, lastTargetSpeedCommandAt + TARGET_SPEED_THROTTLE_MS - Date.now());
+          if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+          if (!treadmillRunning || requestGeneration !== targetSpeedRequestGeneration) return false;
+          lastTargetSpeedCommandAt = Date.now();
+          return true;
+        })
+          .then((result) => {
+            if (!result.cancelled) log(`Target speed confirmed at ${requestedSpeed.toFixed(1)} km/h`);
+          })
+          .catch((error) => log(error.message, 'error'))
+          .finally(() => {
+            targetSpeedCommandActive = false;
+            if (targetSpeedCommandPending && treadmillRunning) scheduleTargetSpeedCommand();
+          });
+      }
+
+      function requestTargetSpeedCommand() {
+        if (!treadmillRunning) return;
+        targetSpeedCommandPending = true;
+        scheduleTargetSpeedCommand();
       }
 
       async function start() {
         const RAMP_UP_DELAY_MS = 5000; // 5 seconds
 
+        const startRampGeneration = ++rampUpGeneration;
         clearTimeout(rampUpTimeout);
+        rampUpTimeout = null;
+        cancelTargetSpeedThrottle();
         treadmillRunning = false;
         setSlowestActive(false);
         try {
@@ -679,6 +1046,7 @@
             treadmillRunning = true;
             updateSlowestButton();
             log('Start command confirmed');
+            beginOrResumeSession();
     
             const initialSpeed = 1.0;
             const value = Math.round(initialSpeed * 100);
@@ -688,7 +1056,7 @@
             // Wait for the treadmill to ramp up before setting the final target speed
             rampUpTimeout = setTimeout(async () => {
                 try {
-                    if (!treadmillRunning || slowestActive) return;
+                    if (startRampGeneration !== rampUpGeneration || !treadmillRunning || slowestActive) return;
                     const targetValue = Math.round(targetKph * 100);
                     await writeControl(OP_SET_TARGET_SPEED, targetValue);
                     log(`Target speed confirmed at ${targetKph.toFixed(1)} km/h`);
@@ -734,17 +1102,28 @@
       }
 
       async function stop() {
+        rampUpGeneration += 1;
         clearTimeout(rampUpTimeout); // Clear the ramp-up timeout
+        rampUpTimeout = null;
+        cancelTargetSpeedThrottle();
         treadmillRunning = false;
         setSlowestActive(false);
         await writeControl(OP_STOP_OR_PAUSE, new Uint8Array([0x01]));
         log('Stop command confirmed');
+        completeSession();
       }
 
       function adjustTargetSpeed(delta) {
         targetKph = +(targetKph + delta).toFixed(1);
         clampTarget();
         localStorage.setItem('targetSpeed', targetKph);
+        if (treadmillRunning) {
+          rampUpGeneration += 1;
+          clearTimeout(rampUpTimeout);
+          rampUpTimeout = null;
+          if (slowestActive) setSlowestActive(false);
+          requestTargetSpeedCommand();
+        }
       }
 
       // ===== wire up UI =====
@@ -784,6 +1163,80 @@
       });
       ui('btnMinus').addEventListener('click', () => {
         adjustTargetSpeed(-0.5);
+      });
+      ui('btnPlusSmall').addEventListener('click', () => {
+        adjustTargetSpeed(+0.1);
+      });
+      ui('btnMinusSmall').addEventListener('click', () => {
+        adjustTargetSpeed(-0.1);
+      });
+      const clearHistoryButton = ui('btnClearHistory');
+      const clearHistoryDialog = ui('clearHistoryDialog');
+      const clearHistoryDialogTitle = ui('clearHistoryDialogTitle');
+      const clearHistoryDialogDescription = ui('clearHistoryDialogDescription');
+      const cancelClearHistoryButton = ui('cancelClearHistory');
+      const confirmClearHistoryButton = ui('confirmClearHistory');
+      let lastFocusedBeforeClearHistory = null;
+      let pendingHistoryDeleteId = null;
+
+      function closeClearHistoryDialog(value = '') {
+        if (typeof clearHistoryDialog.close === 'function' && clearHistoryDialog.open) {
+          clearHistoryDialog.close(value);
+          return;
+        }
+        clearHistoryDialog.returnValue = value;
+        clearHistoryDialog.removeAttribute('open');
+        clearHistoryDialog.dispatchEvent(new Event('close'));
+      }
+
+      function openHistoryConfirmation(action, sessionId = null, sessionLabel = '') {
+        lastFocusedBeforeClearHistory = document.activeElement;
+        pendingHistoryDeleteId = sessionId;
+        if (action === 'delete') {
+          clearHistoryDialogTitle.textContent = 'Delete this walking session?';
+          clearHistoryDialogDescription.textContent = `This permanently deletes the session started ${sessionLabel} from this browser.`;
+          confirmClearHistoryButton.textContent = 'Delete session';
+        } else {
+          clearHistoryDialogTitle.textContent = 'Clear walking history?';
+          clearHistoryDialogDescription.textContent = 'This permanently deletes all saved walking sessions from this browser on this device.';
+          confirmClearHistoryButton.textContent = 'Clear history';
+        }
+        if (typeof clearHistoryDialog.showModal === 'function') {
+          clearHistoryDialog.showModal();
+        } else {
+          clearHistoryDialog.setAttribute('open', '');
+        }
+        cancelClearHistoryButton.focus();
+      }
+
+      clearHistoryButton.addEventListener('click', () => {
+        openHistoryConfirmation('clear');
+      });
+      ui('cancelClearHistory').addEventListener('click', (event) => {
+        event.preventDefault();
+        closeClearHistoryDialog('cancel');
+      });
+      ui('confirmClearHistory').addEventListener('click', (event) => {
+        event.preventDefault();
+        closeClearHistoryDialog('confirm');
+      });
+      clearHistoryDialog.addEventListener('close', () => {
+        if (clearHistoryDialog.returnValue === 'confirm') {
+          if (pendingHistoryDeleteId === null) clearAllHistory();
+          else deleteSession(pendingHistoryDeleteId);
+        }
+        pendingHistoryDeleteId = null;
+        if (lastFocusedBeforeClearHistory && typeof lastFocusedBeforeClearHistory.focus === 'function') {
+          lastFocusedBeforeClearHistory.focus();
+        }
+        lastFocusedBeforeClearHistory = null;
+      });
+      ui('sessionHistoryContent').addEventListener('click', (event) => {
+        const deleteButton = event.target.closest('.session-delete-button');
+        if (deleteButton) {
+          const session = sessionHistory.find((item) => item.id === deleteButton.dataset.sessionId);
+          if (session) openHistoryConfirmation('delete', session.id, formatLocalDateTime(session.startedAt));
+        }
       });
     })();
     </script>
