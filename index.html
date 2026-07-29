@@ -114,6 +114,15 @@
             cursor: not-allowed;
             transform: none;
         }
+        button:focus-visible {
+            outline: 3px solid #ffffff;
+            outline-offset: 3px;
+        }
+        #btnSlowest[aria-pressed="true"] {
+            background: rgba(245, 158, 11, 0.8);
+            border-color: #fbbf24;
+            box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35);
+        }
         .status-badge {
             padding: 0.4rem 0.8rem;
             border-radius: 20px;
@@ -180,6 +189,40 @@
             padding: 2px 6px;
             border-radius: 4px;
         }
+        .live-metrics {
+            margin: 1.5rem 0;
+        }
+        .live-metrics h2 {
+            font-size: 1.1rem;
+            margin: 0 0 0.75rem;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.75rem;
+        }
+        .metric-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 0.8rem;
+        }
+        .metric-card h3 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin: 0 0 0.4rem;
+            opacity: 0.8;
+        }
+        .metric-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin: 0;
+        }
+        .metric-unit {
+            font-size: 0.8rem;
+            font-weight: 400;
+            opacity: 0.75;
+        }
     </style>
 </head>
 <body>
@@ -194,7 +237,7 @@
         </div>
 
         <div class="grid">
-            <div class="stat-card">
+            <div class="stat-card" id="metricInstantaneousSpeed" hidden>
                 <div class="stat-label">Current Speed</div>
                 <div class="stat-value">
                     <span id="speed">0.0</span> 
@@ -224,10 +267,25 @@
 
         <div class="controls">
             <button id="btnStart" disabled>▶️ Start</button>
+            <button id="btnSlowest" type="button" aria-pressed="false" disabled>Slowest</button>
             <button id="btnStop" disabled>⏸ Stop</button>
         </div>
 
         <div class="log" id="log"></div>
+
+        <section id="liveMetrics" class="live-metrics" aria-labelledby="liveMetricsTitle">
+            <h2 id="liveMetricsTitle">Live FTMS metrics</h2>
+            <div class="metric-grid">
+                <article class="metric-card" id="metricTotalDistance" hidden>
+                    <h3>Total Distance</h3>
+                    <p class="metric-value"><span id="metricTotalDistanceValue">—</span> <span class="metric-unit">m</span></p>
+                </article>
+                <article class="metric-card" id="metricElapsedTime" hidden>
+                    <h3>Elapsed Time</h3>
+                    <p class="metric-value"><span id="metricElapsedTimeValue">—</span> <span class="metric-unit">min:s</span></p>
+                </article>
+            </div>
+        </section>
 
     </div>
 
@@ -235,7 +293,6 @@
     (async () => {
       // ======= Assigned Numbers (16-bit UUIDs) =======
       const FTMS_SERVICE                = 0x1826; // Fitness Machine Service
-      const CH_FITNESS_MACHINE_FEATURE  = 0x2ACC; // bitfields for features
       const CH_TREADMILL_DATA           = 0x2ACD; // notifications with speed, etc.
       const CH_SUPPORTED_SPEED_RANGE    = 0x2AD4; // min, max, increment (0.01 km/h)
       const CH_FITNESS_MACHINE_CONTROL  = 0x2AD9; // write + indicate responses
@@ -256,11 +313,37 @@
         0x04: 'Operation Failed',
         0x05: 'Control Not Permitted'
       };
+      const TREADMILL_DATA_FIELDS = [
+        { bit: 0, key: 'instantaneousSpeed', size: 2, inverted: true,
+          read: (dv, offset) => dv.getUint16(offset, true) / 100 },
+        { bit: 1, size: 2 },
+        { bit: 2, key: 'totalDistance', size: 3, read: readUint24 },
+        { bit: 3, size: 4 },
+        { bit: 4, size: 4 },
+        { bit: 5, size: 2 },
+        { bit: 6, size: 2 },
+        { bit: 7, size: 5 },
+        { bit: 8, size: 1 },
+        { bit: 9, size: 1 },
+        { bit: 10, key: 'elapsedTime', size: 2, read: (dv, offset) => dv.getUint16(offset, true) },
+        { bit: 11, size: 2 },
+        { bit: 12, size: 4 }
+      ];
 
       const ui = (id) => document.getElementById(id);
 
+      function readUint24(dv, offset) {
+        return dv.getUint8(offset) | (dv.getUint8(offset + 1) << 8) | (dv.getUint8(offset + 2) << 16);
+      }
+
+      function formatDuration(seconds) {
+        const wholeSeconds = Math.round(seconds);
+        const minutes = Math.floor(wholeSeconds / 60);
+        const remainder = wholeSeconds % 60;
+        return `${minutes}:${remainder.toString().padStart(2, '0')}`;
+      }
+
       const log = (m, level="") => {
-        console.log(`[LOG] ${level.toUpperCase()}: ${m}`);
         const el = ui('log');
         el.textContent += m + "\n";
         el.scrollTop = el.scrollHeight;
@@ -276,6 +359,11 @@
       let rampUpTimeout;
       let controlPointPending = null;
       let controlPointQueue = Promise.resolve();
+      let controlsAvailable = false;
+      let treadmillRunning = false;
+      let slowestActive = false;
+      let slowestCommandPending = false;
+      let speedRangeAvailable = false;
 
       // Load target speed from localStorage
       let savedTargetSpeed = localStorage.getItem('targetSpeed');
@@ -285,22 +373,83 @@
       updateTargetDisplay();
 
       function updateTargetDisplay() {
-        console.log('updateTargetDisplay called');
         ui('target').textContent = targetKph.toFixed(1);
       }
 
       function clampTarget() {
-        console.log(`clampTarget called. Initial target: ${targetKph} km/h`);
         targetKph = Math.max(minKph, Math.min(maxKph, targetKph));
         // snap to step increment
         const steps = Math.round((targetKph - minKph) / stepKph);
         targetKph = +(minKph + steps * stepKph).toFixed(1);
-        console.log(`Clamped and snapped target: ${targetKph} km/h`);
         updateTargetDisplay();
       }
 
+      function updateSlowestButton() {
+        const button = ui('btnSlowest');
+        button.setAttribute('aria-pressed', String(slowestActive));
+        button.disabled = !controlsAvailable || !treadmillRunning || !speedRangeAvailable || slowestCommandPending || !!controlPointPending;
+      }
+
+      function setSlowestActive(active) {
+        slowestActive = active;
+        updateSlowestButton();
+      }
+
+      function parseTreadmillData(dv) {
+        if (dv.byteLength < 2) return {};
+
+        const flags = dv.getUint16(0, true);
+        const values = {};
+        let offset = 2;
+
+        for (const field of TREADMILL_DATA_FIELDS) {
+          const present = field.inverted
+            ? (flags & (1 << field.bit)) === 0
+            : (flags & (1 << field.bit)) !== 0;
+          if (!present) continue;
+          if (offset + field.size > dv.byteLength) break;
+          if (field.key) values[field.key] = field.read(dv, offset);
+          offset += field.size;
+        }
+
+        return values;
+      }
+
+      function setMetricVisible(id, visible) {
+        ui(id).hidden = !visible;
+      }
+
+      function updateLiveMetrics(values) {
+        if (Object.prototype.hasOwnProperty.call(values, 'totalDistance') && values.totalDistance !== 0xFFFFFF) {
+          ui('metricTotalDistanceValue').textContent = values.totalDistance.toString();
+          setMetricVisible('metricTotalDistance', true);
+        }
+        if (Object.prototype.hasOwnProperty.call(values, 'elapsedTime') && values.elapsedTime !== 0xFFFF) {
+          ui('metricElapsedTimeValue').textContent = formatDuration(values.elapsedTime);
+          setMetricVisible('metricElapsedTime', true);
+        }
+        if (Object.prototype.hasOwnProperty.call(values, 'instantaneousSpeed')
+            && values.instantaneousSpeed >= 0 && values.instantaneousSpeed < 100) {
+          ui('speed').textContent = values.instantaneousSpeed.toFixed(1);
+          currentSpeedKph = values.instantaneousSpeed;
+          setMetricVisible('metricInstantaneousSpeed', true);
+        }
+      }
+
+      function resetLiveMetrics() {
+        ui('speed').textContent = '0.0';
+        ui('metricTotalDistanceValue').textContent = '—';
+        ui('metricElapsedTimeValue').textContent = '—';
+        setMetricVisible('metricInstantaneousSpeed', false);
+        setMetricVisible('metricTotalDistance', false);
+        setMetricVisible('metricElapsedTime', false);
+      }
+
       async function connect() {
-        console.log('connect function started');
+        resetLiveMetrics();
+        treadmillRunning = false;
+        speedRangeAvailable = false;
+        setSlowestActive(false);
         setControlsEnabled(false);
         if (!('bluetooth' in navigator)) {
           console.error('Web Bluetooth not supported.');
@@ -309,7 +458,6 @@
         }
 
         log('Requesting treadmill with FTMS (0x1826)…');
-        console.log('Requesting Bluetooth device...');
         device = await navigator.bluetooth.requestDevice({
           filters: [
             // Filter by FTMS service; the chooser should only show FTMS devices (e.g., treadmills)
@@ -319,30 +467,21 @@
           ],
           optionalServices: [FTMS_SERVICE]
         });
-        console.log('Device selected:', device);
 
         ui('deviceName').textContent = device.name || '(unnamed)';
 
         device.addEventListener('gattserverdisconnected', onDisconnected);
 
-        console.log('Connecting to GATT server...');
         server = await device.gatt.connect();
-        console.log('GATT server connected:', server);
-        console.log('Getting FTMS primary service...');
         ftms = await server.getPrimaryService(FTMS_SERVICE);
-        console.log('FTMS service obtained:', ftms);
 
         // Characteristics we use
-        console.log('Getting characteristics...');
         chCtrl       = await ftms.getCharacteristic(CH_FITNESS_MACHINE_CONTROL);
-        console.log('Fitness Machine Control characteristic:', chCtrl);
         chData       = await ftms.getCharacteristic(CH_TREADMILL_DATA);
-        console.log('Treadmill Data characteristic:', chData);
         chSpeedRange = await ftms.getCharacteristic(CH_SUPPORTED_SPEED_RANGE).catch((e) => {
             console.warn('Supported Speed Range characteristic not found:', e);
             return null;
         });
-        console.log('Supported Speed Range characteristic:', chSpeedRange);
 
         const controlProperties = chCtrl.properties || {};
         if (!controlProperties.indicate) {
@@ -360,23 +499,19 @@
         await writeControl(OP_REQUEST_CONTROL);
 
         // Subscribe to treadmill data for live speed
-        console.log('Starting notifications for Treadmill Data...');
         await chData.startNotifications();
         chData.addEventListener('characteristicvaluechanged', onTreadmillData);
-        console.log('Treadmill Data notifications started.');
 
         // Read supported speed range if available
         if (chSpeedRange) {
-          console.log('Reading Supported Speed Range...');
           const dv = await chSpeedRange.readValue();
-          console.log('Supported Speed Range raw value:', dv);
           // All are uint16 little-endian in 0.01 km/h
           minKph  = dv.getUint16(0, true) / 100;
           maxKph  = dv.getUint16(2, true) / 100;
           stepKph = dv.getUint16(4, true) / 100;
-          console.log(`Speed range parsed: min=${minKph}, max=${maxKph}, step=${stepKph}`);
           ui('range').textContent = `${minKph.toFixed(1)}–${maxKph.toFixed(1)} km/h`;
           ui('step').textContent  = `${stepKph.toFixed(1)} km/h`;
+          speedRangeAvailable = dv.byteLength >= 6 && stepKph > 0;
           targetKph = Math.max(minKph, Math.min(5, maxKph));
           updateTargetDisplay();
         } else {
@@ -387,7 +522,6 @@
 
         setControlsEnabled(true);
         log('Connected successfully');
-        console.log('Connection process complete.');
       }
 
       function disconnect() {
@@ -402,12 +536,16 @@
         const pending = controlPointPending;
         controlPointPending = null;
         clearTimeout(pending.timeoutId);
+        updateSlowestButton();
         pending.reject(error);
       }
 
       function onDisconnected() {
         console.warn('GATT server disconnected.');
         rejectPendingControlPoint(new Error('Fitness Machine Control Point disconnected before a response.'));
+        treadmillRunning = false;
+        speedRangeAvailable = false;
+        setSlowestActive(false);
         log('Disconnected');
         setControlsEnabled(false);
         ui('status').textContent = 'disconnected';
@@ -415,31 +553,18 @@
       }
 
       function setControlsEnabled(enabled) {
-        console.log(`Setting controls enabled state to: ${enabled}`);
-                ui('btnStart').disabled = !enabled;
-                ui('btnStop').disabled  = !enabled;
+        controlsAvailable = enabled;
+        ui('btnStart').disabled = !enabled;
+        ui('btnStop').disabled  = !enabled;
         ui('btnConnect').hidden = enabled;
         ui('btnDisconnect').hidden = !enabled;
+        updateSlowestButton();
       }
 
       function onTreadmillData(event) {
         const dv = event.target.value; // DataView
-        if (dv.byteLength < 2) return;
-
-        const flags = dv.getUint16(0, true);
-        const moreData = (flags & 0x0001) !== 0;
-
-        // FTMS flag bit 0 is "More Data": when clear, instantaneous speed is
-        // present immediately after the flags; when set, it is omitted.
-        if (moreData || dv.byteLength < 4) return;
-
-        const speedKph = dv.getUint16(2, true) / 100;
-
-        // Ignore implausible values without replacing the last valid live reading.
-        if (speedKph >= 100) return;
-
-        ui('speed').textContent = speedKph.toFixed(1);
-        currentSpeedKph = speedKph;
+        const values = parseTreadmillData(dv);
+        updateLiveMetrics(values);
       }
 
       function onControlPointIndication(event) {
@@ -474,6 +599,7 @@
 
         controlPointPending = null;
         clearTimeout(pending.timeoutId);
+        updateSlowestButton();
         if (rc !== RESULT_SUCCESS) {
           const error = new Error(`Control Point opcode 0x${req.toString(16)} rejected: ${resultName} (0x${rc.toString(16)})`);
           log(error.message, 'error');
@@ -494,10 +620,12 @@
           const timeoutId = setTimeout(() => {
             if (controlPointPending && controlPointPending.opcode === opcode) {
               controlPointPending = null;
+              updateSlowestButton();
               reject(new Error(`Timed out waiting for Control Point response to opcode 0x${opcode.toString(16)}.`));
             }
           }, CONTROL_POINT_TIMEOUT_MS);
           controlPointPending = { opcode, resolve, reject, timeoutId };
+          updateSlowestButton();
         });
       }
 
@@ -543,9 +671,13 @@
       async function start() {
         const RAMP_UP_DELAY_MS = 5000; // 5 seconds
 
-        console.log('start function called');
+        clearTimeout(rampUpTimeout);
+        treadmillRunning = false;
+        setSlowestActive(false);
         try {
             await writeControl(OP_START_OR_RESUME);
+            treadmillRunning = true;
+            updateSlowestButton();
             log('Start command confirmed');
     
             const initialSpeed = 1.0;
@@ -556,12 +688,14 @@
             // Wait for the treadmill to ramp up before setting the final target speed
             rampUpTimeout = setTimeout(async () => {
                 try {
+                    if (!treadmillRunning || slowestActive) return;
                     const targetValue = Math.round(targetKph * 100);
-                    console.log(`Ramp-up delay complete. Setting target speed to ${targetKph.toFixed(1)} km/h`);
                     await writeControl(OP_SET_TARGET_SPEED, targetValue);
                     log(`Target speed confirmed at ${targetKph.toFixed(1)} km/h`);
                 } catch (e) {
                     console.error('Error setting target speed after delay:', e);
+                    treadmillRunning = false;
+                    setSlowestActive(false);
                     setControlsEnabled(false);
                     log(e.message, 'error');
                 }
@@ -569,20 +703,45 @@
 
         } catch (e) {
             console.error('Failed to send start commands:', e);
+            treadmillRunning = false;
+            setSlowestActive(false);
             setControlsEnabled(false);
             log(e.message, 'error');
         }
       }
 
+      async function toggleSlowest() {
+        if (!controlsAvailable || !treadmillRunning || !speedRangeAvailable || slowestCommandPending) return;
+
+        const previousState = slowestActive;
+        const nextState = !previousState;
+        const requestedSpeed = nextState ? minKph : targetKph;
+        slowestCommandPending = true;
+        setSlowestActive(nextState);
+
+        try {
+          await writeControl(OP_SET_TARGET_SPEED, Math.round(requestedSpeed * 100));
+          log(nextState
+            ? `Slowest speed confirmed at ${minKph.toFixed(1)} km/h`
+            : `Normal target speed confirmed at ${targetKph.toFixed(1)} km/h`);
+        } catch (e) {
+          setSlowestActive(previousState);
+          throw e;
+        } finally {
+          slowestCommandPending = false;
+          updateSlowestButton();
+        }
+      }
+
       async function stop() {
-        console.log('stop function called');
         clearTimeout(rampUpTimeout); // Clear the ramp-up timeout
+        treadmillRunning = false;
+        setSlowestActive(false);
         await writeControl(OP_STOP_OR_PAUSE, new Uint8Array([0x01]));
         log('Stop command confirmed');
       }
 
       function adjustTargetSpeed(delta) {
-        console.log(`adjustTargetSpeed function called with delta: ${delta}`);
         targetKph = +(targetKph + delta).toFixed(1);
         clampTarget();
         localStorage.setItem('targetSpeed', targetKph);
@@ -590,7 +749,6 @@
 
       // ===== wire up UI =====
       ui('btnConnect').addEventListener('click', () => {
-        console.log('Connect button clicked');
         connect().catch(e => {
             console.error('Connection failed:', e);
             setControlsEnabled(false);
@@ -598,19 +756,23 @@
         });
       });
       ui('btnDisconnect').addEventListener('click', () => {
-        console.log('Disconnect button clicked');
         disconnect();
       });
       ui('btnStart').addEventListener('click', () => {
-        console.log('Start button clicked');
         start().catch(e => {
             console.error('Start command failed:', e);
             setControlsEnabled(false);
             log(e.message, 'error');
         });
       });
+      ui('btnSlowest').addEventListener('click', () => {
+        toggleSlowest().catch(e => {
+            console.error('Slowest command failed:', e);
+            setControlsEnabled(false);
+            log(e.message, 'error');
+        });
+      });
       ui('btnStop').addEventListener('click',  () => {
-        console.log('Stop button clicked');
         stop().catch(e => {
             console.error('Stop command failed:', e);
             setControlsEnabled(false);
@@ -618,16 +780,11 @@
         });
       });
       ui('btnPlus').addEventListener('click',  () => {
-        console.log('Plus button clicked');
         adjustTargetSpeed(+0.5);
       });
       ui('btnMinus').addEventListener('click', () => {
-        console.log('Minus button clicked');
         adjustTargetSpeed(-0.5);
       });
-
-      // Initialize display
-      console.log('Script initialization complete.');
     })();
     </script>
 </body>
