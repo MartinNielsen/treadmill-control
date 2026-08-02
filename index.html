@@ -1365,18 +1365,31 @@
         ui(id).hidden = !visible;
       }
 
+      function getDisplayedResumedMetrics() {
+        const session = getResumedSession();
+        if (!resumedSession || !session) {
+          return {
+            distance: latestTotalDistance,
+            elapsedTime: latestElapsedTime
+          };
+        }
+        return {
+          distance: isValidDistance(session.endDistance) && Number.isFinite(resumedSession.extraDistanceMeters)
+            ? session.endDistance + resumedSession.extraDistanceMeters
+            : latestTotalDistance,
+          elapsedTime: Number.isFinite(session.durationSeconds) && session.durationSeconds >= 0
+            && Number.isFinite(resumedSession.extraDurationSeconds)
+            ? session.durationSeconds + resumedSession.extraDurationSeconds
+            : latestElapsedTime
+        };
+      }
+
       function updateLiveMetrics(values) {
         if (Object.prototype.hasOwnProperty.call(values, 'totalDistance') && values.totalDistance !== 0xFFFFFF) {
           latestTotalDistance = values.totalDistance;
-          ui('liveMetrics').hidden = false;
-          ui('metricTotalDistanceValue').textContent = values.totalDistance.toString();
-          setMetricVisible('metricTotalDistance', true);
         }
         if (Object.prototype.hasOwnProperty.call(values, 'elapsedTime') && values.elapsedTime !== 0xFFFF) {
           latestElapsedTime = values.elapsedTime;
-          ui('liveMetrics').hidden = false;
-          ui('metricElapsedTimeValue').textContent = formatDuration(values.elapsedTime);
-          setMetricVisible('metricElapsedTime', true);
         }
         if (Object.prototype.hasOwnProperty.call(values, 'instantaneousSpeed')
             && values.instantaneousSpeed >= 0 && values.instantaneousSpeed < 100) {
@@ -1385,6 +1398,17 @@
           setMetricVisible('metricInstantaneousSpeed', true);
         }
         updateInProgressSessionMetrics();
+        const displayedMetrics = getDisplayedResumedMetrics();
+        if (isValidDistance(displayedMetrics.distance)) {
+          ui('liveMetrics').hidden = false;
+          ui('metricTotalDistanceValue').textContent = Math.round(displayedMetrics.distance).toString();
+          setMetricVisible('metricTotalDistance', true);
+        }
+        if (isValidElapsedTime(displayedMetrics.elapsedTime)) {
+          ui('liveMetrics').hidden = false;
+          ui('metricElapsedTimeValue').textContent = formatDuration(displayedMetrics.elapsedTime);
+          setMetricVisible('metricElapsedTime', true);
+        }
       }
 
       function resetLiveMetrics() {
