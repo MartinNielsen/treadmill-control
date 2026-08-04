@@ -456,6 +456,7 @@
             --amber: #f5b942;
             --red: #f05d5e;
             --focus: #8ff8e8;
+            --primary-value-size: clamp(3.8rem, 18vw, 5.8rem);
         }
 
         body {
@@ -585,7 +586,7 @@
         .speed-hero .stat-value {
             margin: 8px 0 0;
             color: var(--teal);
-            font-size: clamp(3.8rem, 18vw, 5.8rem);
+            font-size: var(--primary-value-size);
             line-height: 0.95;
             letter-spacing: -0.08em;
         }
@@ -627,8 +628,10 @@
         .metric-value {
             margin: 0;
             color: var(--teal);
-            font-size: 1.25rem;
+            font-size: var(--primary-value-size);
             font-weight: 700;
+            line-height: 0.95;
+            letter-spacing: -0.08em;
         }
         .metric-unit {
             color: var(--muted);
