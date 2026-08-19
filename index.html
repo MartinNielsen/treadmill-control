@@ -1183,7 +1183,7 @@
       function completeSession() {
         if (resumedSession) {
           const session = getResumedSession();
-          if (!session) return;
+          if (!session) return null;
           updateInProgressSessionMetrics();
           const extraDuration = resumedSession.extraDurationSeconds;
           const extraDistance = resumedSession.extraDistanceMeters;
@@ -1196,10 +1196,10 @@
           activeSessionId = null;
           saveSessionHistory();
           renderSessionHistory();
-          return;
+          return session;
         }
         const session = getInProgressSession();
-        if (!session) return;
+        if (!session) return null;
 
         const endedAt = Date.now();
         const endDistance = isValidDistance(latestTotalDistance) ? latestTotalDistance : session.latestDistance;
@@ -1212,6 +1212,7 @@
         saveSessionHistory();
         renderSessionHistory();
         activeSessionId = null;
+        return session;
       }
 
       function deleteSession(sessionId) {
@@ -1802,7 +1803,7 @@
         }
       }
 
-      async function stop() {
+      async function stop({ showSessionActions = false } = {}) {
         rampUpGeneration += 1;
         clearTimeout(rampUpTimeout); // Clear the ramp-up timeout
         rampUpTimeout = null;
@@ -1811,7 +1812,8 @@
         setSlowestActive(false);
         await writeControl(OP_STOP_OR_PAUSE, new Uint8Array([0x01]));
         log('Stop command confirmed');
-        completeSession();
+        const stoppedSession = completeSession();
+        if (showSessionActions && stoppedSession) openSessionActionDialog(stoppedSession);
       }
 
       function adjustTargetSpeed(delta) {
@@ -1854,7 +1856,7 @@
         });
       });
       ui('btnStop').addEventListener('click',  () => {
-        stop().catch(e => {
+        stop({ showSessionActions: true }).catch(e => {
             console.error('Stop command failed:', e);
             setControlsEnabled(false);
             log(e.message, 'error');
@@ -1890,6 +1892,8 @@
       const closeSessionActionDialogButton = ui('closeSessionActionDialog');
       let selectedSessionId = null;
       let lastFocusedBeforeSessionAction = null;
+      const SESSION_ACTION_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+      let sessionActionIdleTimer = null;
 
       function updateSessionActionAvailability() {
         if (!sessionPlayButton) return;
@@ -1961,12 +1965,24 @@
       });
 
       function closeSessionActionDialog() {
+        if (sessionActionIdleTimer !== null) {
+          clearTimeout(sessionActionIdleTimer);
+          sessionActionIdleTimer = null;
+        }
         if (typeof sessionActionDialog.close === 'function' && sessionActionDialog.open) {
           sessionActionDialog.close();
         } else {
           sessionActionDialog.removeAttribute('open');
           sessionActionDialog.dispatchEvent(new Event('close'));
         }
+      }
+
+      function resetSessionActionIdleTimer() {
+        if (sessionActionIdleTimer !== null) clearTimeout(sessionActionIdleTimer);
+        sessionActionIdleTimer = setTimeout(() => {
+          sessionActionIdleTimer = null;
+          closeSessionActionDialog();
+        }, SESSION_ACTION_IDLE_TIMEOUT_MS);
       }
 
       function openSessionActionDialog(session) {
@@ -1990,6 +2006,7 @@
         } else {
           sessionActionDialog.setAttribute('open', '');
         }
+        resetSessionActionIdleTimer();
         sessionRenameButton.focus();
       }
 
@@ -2055,9 +2072,16 @@
       });
       closeSessionActionDialogButton.addEventListener('click', () => closeSessionActionDialog());
       sessionActionDialog.addEventListener('pointerdown', (event) => {
+        resetSessionActionIdleTimer();
         if (event.target === sessionActionDialog) closeSessionActionDialog();
       });
+      sessionActionDialog.addEventListener('keydown', resetSessionActionIdleTimer);
+      sessionActionDialog.addEventListener('input', resetSessionActionIdleTimer);
       sessionActionDialog.addEventListener('close', () => {
+        if (sessionActionIdleTimer !== null) {
+          clearTimeout(sessionActionIdleTimer);
+          sessionActionIdleTimer = null;
+        }
         const focusTarget = lastFocusedBeforeSessionAction?.isConnected
           ? lastFocusedBeforeSessionAction
           : sessionHistory.find((item) => item.id === selectedSessionId)
