@@ -735,6 +735,110 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        .camera-panel {
+            margin-top: 28px;
+            padding: 18px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--surface);
+        }
+        .camera-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .camera-heading h2 {
+            margin: 0;
+            font-size: 1.05rem;
+        }
+        .camera-badge {
+            padding: 0.3rem 0.55rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--muted);
+            font-size: 0.7rem;
+            font-weight: 700;
+        }
+        .camera-badge[data-tone="ready"],
+        .camera-badge[data-tone="empty"] {
+            border-color: #247d68;
+            color: var(--teal);
+        }
+        .camera-badge[data-tone="active"] {
+            border-color: var(--green);
+            background: #173b24;
+            color: #8af1ad;
+        }
+        .camera-badge[data-tone="error"] {
+            border-color: #a9474b;
+            color: #ff9c9d;
+        }
+        .camera-form label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--muted);
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+        .camera-url-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+        }
+        .camera-url-row input {
+            min-width: 0;
+            padding: 0.7rem;
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            background: var(--surface-muted);
+            color: var(--text);
+            font: inherit;
+        }
+        .camera-url-row input:focus-visible {
+            outline: 3px solid var(--focus);
+            outline-offset: 2px;
+        }
+        .camera-preview-wrap {
+            margin-top: 14px;
+        }
+        .camera-preview {
+            display: block;
+            width: 100%;
+            height: auto;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #080b0c;
+            cursor: crosshair;
+            touch-action: none;
+        }
+        .camera-help,
+        .camera-status,
+        .camera-privacy {
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+        .camera-status {
+            min-height: 2.25em;
+            color: var(--text);
+        }
+        .camera-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+        .camera-actions button {
+            flex: 1 1 8rem;
+        }
+        #btnEnableCamera {
+            border-color: #247d68;
+            background: #12352d;
+            color: var(--teal);
+        }
         .session-history {
             margin-top: 34px;
             padding-top: 22px;
@@ -866,6 +970,31 @@
             <section class="operational-status" aria-label="Operational status" aria-live="polite">
                 <span class="status-label">Status</span>
                 <span id="operationalStatus">Ready to connect.</span>
+            </section>
+
+            <section class="camera-panel" aria-labelledby="cameraTitle">
+                <div class="camera-heading">
+                    <h2 id="cameraTitle">Camera timing</h2>
+                    <span id="cameraBadge" class="camera-badge" data-tone="idle">Off</span>
+                </div>
+                <form id="cameraForm" class="camera-form">
+                    <label for="cameraUrl">go2rtc stream or snapshot URL</label>
+                    <div class="camera-url-row">
+                        <input id="cameraUrl" name="cameraUrl" type="url" inputmode="url" required autocomplete="url" spellcheck="false">
+                        <button id="btnTestCamera" type="submit">Preview</button>
+                    </div>
+                </form>
+                <div id="cameraPreviewWrap" class="camera-preview-wrap" hidden>
+                    <canvas id="cameraPreview" class="camera-preview" width="640" height="360" aria-label="Camera preview with selected treadmill area"></canvas>
+                    <p class="camera-help">Drag over the preview to select the area where a person would be on the treadmill.</p>
+                </div>
+                <div class="camera-actions">
+                    <button id="btnCameraFullFrame" type="button" disabled>Use full frame</button>
+                    <button id="btnEnableCamera" type="button">Enable timing</button>
+                    <button id="btnDisableCamera" type="button" hidden>Disable timing</button>
+                </div>
+                <p id="cameraStatus" class="camera-status" role="status" aria-live="polite">Preview the camera, select the treadmill area, then enable timing.</p>
+                <p class="camera-privacy">Person detection runs only in this browser. Camera timing never starts or stops the treadmill belt.</p>
             </section>
 
             <section class="session-history" aria-labelledby="sessionHistoryTitle">
@@ -1113,6 +1242,13 @@
         }
         const session = getInProgressSession();
         if (!session) return;
+        if (session.source === 'camera') {
+          session.latestElapsedTime = Math.max(0, (Date.now() - session.startedAt) / 1000);
+          if (isValidDistance(latestTotalDistance)) session.latestDistance = latestTotalDistance;
+          saveSessionHistory();
+          renderSessionHistory();
+          return;
+        }
         if (isValidDistance(latestTotalDistance)) session.latestDistance = latestTotalDistance;
         if (isValidElapsedTime(latestElapsedTime)) session.latestElapsedTime = latestElapsedTime;
         saveSessionHistory();
@@ -1161,6 +1297,32 @@
         }
       }
 
+      function beginCameraTimedSession() {
+        if (getInProgressSession()) return;
+        const session = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          source: 'camera',
+          startedAt: Date.now(),
+          endedAt: null,
+          startDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : null,
+          latestDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : null,
+          latestElapsedTime: 0,
+          endDistance: null,
+          durationSeconds: null
+        };
+        sessionHistory.push(session);
+        activeSessionId = session.id;
+        saveSessionHistory();
+        updateCameraTimedSessionDisplay();
+      }
+
+      function completeCameraTimedSession() {
+        const session = getInProgressSession();
+        if (!session || session.source !== 'camera') return;
+        completeSession();
+        updateCameraTimedSessionDisplay();
+      }
+
       function resumeStoredSession() {
         const session = getInProgressSession();
         if (session) activeSessionId = session.id;
@@ -1203,7 +1365,9 @@
 
         const endedAt = Date.now();
         const endDistance = isValidDistance(latestTotalDistance) ? latestTotalDistance : session.latestDistance;
-        const deviceDuration = isValidElapsedTime(latestElapsedTime) ? latestElapsedTime : session.latestElapsedTime;
+        const deviceDuration = session.source === 'camera'
+          ? session.latestElapsedTime
+          : isValidElapsedTime(latestElapsedTime) ? latestElapsedTime : session.latestElapsedTime;
         session.endedAt = endedAt;
         session.endDistance = isValidDistance(endDistance) ? endDistance : null;
         session.durationSeconds = isValidElapsedTime(deviceDuration)
@@ -1371,6 +1535,13 @@
 
       function getDisplayedResumedMetrics() {
         const session = getResumedSession();
+        const inProgressSession = getInProgressSession();
+        if (!resumedSession && inProgressSession?.source === 'camera') {
+          return {
+            distance: inProgressSession.latestDistance,
+            elapsedTime: inProgressSession.latestElapsedTime
+          };
+        }
         if (!resumedSession || !session) {
           return {
             distance: latestTotalDistance,
@@ -1412,6 +1583,20 @@
           ui('liveMetrics').hidden = false;
           ui('metricElapsedTimeValue').textContent = formatDuration(displayedMetrics.elapsedTime);
           setMetricVisible('metricElapsedTime', true);
+        }
+      }
+
+      function updateCameraTimedSessionDisplay() {
+        const session = getInProgressSession();
+        if (session?.source === 'camera') updateInProgressSessionMetrics();
+        const displayedMetrics = getDisplayedResumedMetrics();
+        if (isValidElapsedTime(displayedMetrics.elapsedTime)) {
+          ui('liveMetrics').hidden = false;
+          ui('metricElapsedTimeValue').textContent = formatDuration(displayedMetrics.elapsedTime);
+          setMetricVisible('metricElapsedTime', true);
+        } else if (!treadmillRunning && !resumedSession) {
+          setMetricVisible('metricElapsedTime', false);
+          if (ui('metricTotalDistance').hidden) ui('liveMetrics').hidden = true;
         }
       }
 
@@ -1874,6 +2059,11 @@
       ui('btnMinusSmall').addEventListener('click', () => {
         adjustTargetSpeed(-0.1);
       });
+      window.addEventListener('camera-presence-stable', (event) => {
+        if (event.detail?.state === 'occupied') beginCameraTimedSession();
+        if (event.detail?.state === 'empty') completeCameraTimedSession();
+      });
+      setInterval(updateCameraTimedSessionDisplay, 1000);
       const clearHistoryButton = ui('btnClearHistory');
       const clearHistoryDialog = ui('clearHistoryDialog');
       const clearHistoryDialogTitle = ui('clearHistoryDialogTitle');
@@ -2099,5 +2289,6 @@
       });
     })();
     </script>
+    <script type="module" src="camera.js"></script>
 </body>
 </html>
