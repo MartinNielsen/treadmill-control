@@ -834,6 +834,38 @@
         .camera-actions button {
             flex: 1 1 8rem;
         }
+        .camera-automation {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin-top: 14px;
+            padding: 12px;
+            border: 1px solid #775b27;
+            border-radius: 10px;
+            background: #211b11;
+        }
+        .camera-automation input {
+            flex: 0 0 auto;
+            width: 1.1rem;
+            height: 1.1rem;
+            margin: 0.1rem 0 0;
+            accent-color: var(--teal);
+        }
+        .camera-automation label {
+            color: var(--text);
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+        .camera-automation strong {
+            display: block;
+            margin-bottom: 2px;
+        }
+        .camera-automation-status {
+            margin: 8px 0 0 2.1rem;
+            color: var(--muted);
+            font-size: 0.76rem;
+            line-height: 1.4;
+        }
         #btnEnableCamera {
             border-color: #247d68;
             background: #12352d;
@@ -993,8 +1025,16 @@
                     <button id="btnEnableCamera" type="button">Enable timing</button>
                     <button id="btnDisableCamera" type="button" hidden>Disable timing</button>
                 </div>
+                <div class="camera-automation">
+                    <input id="cameraBeltControl" type="checkbox" aria-describedby="cameraBeltControlDescription">
+                    <label for="cameraBeltControl">
+                        <strong>Automatically control the belt</strong>
+                        <span id="cameraBeltControlDescription">When armed, a detected person starts the belt and an empty treadmill stops it completely. Use the physical emergency stop if needed.</span>
+                    </label>
+                </div>
+                <p id="cameraAutomationStatus" class="camera-automation-status" role="status" aria-live="polite">Automatic belt control is disarmed.</p>
                 <p id="cameraStatus" class="camera-status" role="status" aria-live="polite">Preview the camera, select the treadmill area, then enable timing.</p>
-                <p class="camera-privacy">Person detection runs only in this browser. Camera timing never starts or stops the treadmill belt.</p>
+                <p class="camera-privacy">Person detection runs only in this browser. Automatic belt control is opt-in and requires an active Bluetooth connection.</p>
             </section>
 
             <section class="session-history" aria-labelledby="sessionHistoryTitle">
@@ -1048,6 +1088,7 @@
     }
 
     (async () => {
+      const { CameraBeltController } = await import('./camera-belt-controller.js');
       // ======= Assigned Numbers (16-bit UUIDs) =======
       const FTMS_SERVICE                = 0x1826; // Fitness Machine Service
       const SESSION_HISTORY_KEY         = 'treadmillSessionHistory';
@@ -1114,7 +1155,16 @@
       function loadSessionHistory() {
         try {
           const stored = JSON.parse(localStorage.getItem(SESSION_HISTORY_KEY) || '[]');
-          return Array.isArray(stored) ? stored.filter((session) => session && Number.isFinite(session.startedAt)) : [];
+          return Array.isArray(stored)
+            ? stored.filter((session) => session && Number.isFinite(session.startedAt)).map((session) => {
+                if (session.source === 'camera' && !session.endedAt
+                    && !Number.isFinite(session.cameraAccumulatedSeconds)
+                    && !Number.isFinite(session.cameraActiveSince)) {
+                  session.cameraActiveSince = session.startedAt;
+                }
+                return session;
+              })
+            : [];
         } catch (error) {
           console.warn('Unable to load session history:', error);
           return [];
@@ -1187,6 +1237,29 @@
         return [...sessionHistory].reverse().find((session) => !session.endedAt) || null;
       }
 
+      function getCameraElapsedTime(session, now = Date.now()) {
+        const accumulated = Number.isFinite(session.cameraAccumulatedSeconds)
+          ? Math.max(0, session.cameraAccumulatedSeconds)
+          : isValidElapsedTime(session.latestElapsedTime) ? session.latestElapsedTime : 0;
+        if (!Number.isFinite(session.cameraActiveSince)) return accumulated;
+        return accumulated + Math.max(0, (now - session.cameraActiveSince) / 1000);
+      }
+
+      function setCameraSessionActive(session, active) {
+        if (active) {
+          if (!Number.isFinite(session.cameraAccumulatedSeconds)) {
+            session.cameraAccumulatedSeconds = isValidElapsedTime(session.latestElapsedTime)
+              ? session.latestElapsedTime
+              : 0;
+          }
+          if (!Number.isFinite(session.cameraActiveSince)) session.cameraActiveSince = Date.now();
+        } else {
+          session.cameraAccumulatedSeconds = getCameraElapsedTime(session);
+          session.cameraActiveSince = null;
+        }
+        session.latestElapsedTime = getCameraElapsedTime(session);
+      }
+
       function renderSessionHistory() {
         const content = ui('sessionHistoryContent');
         ui('btnStart').disabled = !controlsAvailable || !!resumedSession;
@@ -1243,7 +1316,7 @@
         const session = getInProgressSession();
         if (!session) return;
         if (session.source === 'camera') {
-          session.latestElapsedTime = Math.max(0, (Date.now() - session.startedAt) / 1000);
+          session.latestElapsedTime = getCameraElapsedTime(session);
           if (isValidDistance(latestTotalDistance)) session.latestDistance = latestTotalDistance;
           saveSessionHistory();
           renderSessionHistory();
@@ -1255,7 +1328,7 @@
         renderSessionHistory();
       }
 
-      function beginOrResumeSession() {
+      function beginOrResumeSession({ cameraControlled = false } = {}) {
         if (pendingResumeSessionId !== null) {
           const session = sessionHistory.find((item) => item.id === pendingResumeSessionId);
           pendingResumeSessionId = null;
@@ -1278,15 +1351,21 @@
         if (!session) {
           session = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            ...(cameraControlled ? { source: 'camera' } : {}),
             startedAt: Date.now(),
             endedAt: null,
             startDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : null,
             latestDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : null,
             latestElapsedTime: isValidElapsedTime(latestElapsedTime) ? latestElapsedTime : null,
+            ...(cameraControlled ? { cameraAccumulatedSeconds: 0, cameraActiveSince: Date.now() } : {}),
             endDistance: null,
             durationSeconds: null
           };
           sessionHistory.push(session);
+        }
+        if (cameraControlled) {
+          session.source = 'camera';
+          setCameraSessionActive(session, true);
         }
         activeSessionId = session.id;
         updateInProgressSessionMetrics();
@@ -1298,20 +1377,20 @@
       }
 
       function beginCameraTimedSession() {
-        if (getInProgressSession()) return;
-        const session = {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          source: 'camera',
-          startedAt: Date.now(),
-          endedAt: null,
-          startDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : null,
-          latestDistance: isValidDistance(latestTotalDistance) ? latestTotalDistance : null,
-          latestElapsedTime: 0,
-          endDistance: null,
-          durationSeconds: null
-        };
-        sessionHistory.push(session);
-        activeSessionId = session.id;
+        beginOrResumeSession({ cameraControlled: true });
+        updateCameraTimedSessionDisplay();
+      }
+
+      function pauseCameraTimedSession() {
+        const session = getInProgressSession();
+        if (!session) return;
+        if (session.source !== 'camera') {
+          session.source = 'camera';
+          session.cameraAccumulatedSeconds = isValidElapsedTime(session.latestElapsedTime)
+            ? session.latestElapsedTime
+            : 0;
+        }
+        setCameraSessionActive(session, false);
         saveSessionHistory();
         updateCameraTimedSessionDisplay();
       }
@@ -1365,6 +1444,7 @@
 
         const endedAt = Date.now();
         const endDistance = isValidDistance(latestTotalDistance) ? latestTotalDistance : session.latestDistance;
+        if (session.source === 'camera') session.latestElapsedTime = getCameraElapsedTime(session);
         const deviceDuration = session.source === 'camera'
           ? session.latestElapsedTime
           : isValidElapsedTime(latestElapsedTime) ? latestElapsedTime : session.latestElapsedTime;
@@ -1417,6 +1497,40 @@
         el.hidden = false;
         ui('operationalStatus').textContent = m;
       };
+
+      const cameraBeltControlCheckbox = ui('cameraBeltControl');
+      const cameraAutomationStatus = ui('cameraAutomationStatus');
+      let cameraBeltControlArmed = false;
+      let cameraBeltController = null;
+
+      function updateCameraAutomationStatus(detail = {}) {
+        const messages = {
+          disarmed: 'Automatic belt control is disarmed.',
+          disconnected: 'Connect the treadmill before arming automatic belt control.',
+          waiting: 'Automatic control is armed and waiting for a stable person detection.',
+          watching: 'Automatic control is armed and waiting for camera presence.',
+          starting: 'Person detected. Starting the belt…',
+          running: 'Belt is running under camera control.',
+          stopping: 'Treadmill empty. Stopping the belt completely…',
+          stopped: 'Belt is stopped. Waiting for a person to return.',
+          error: `Automatic belt control failed: ${detail.error?.message || 'unknown error'}.`
+        };
+        cameraAutomationStatus.textContent = messages[detail.state] || messages.disarmed;
+      }
+
+      function setCameraBeltControlArmed(armed) {
+        cameraBeltControlArmed = Boolean(armed) && controlsAvailable;
+        cameraBeltControlCheckbox.checked = cameraBeltControlArmed;
+        if (cameraBeltController) cameraBeltController.setArmed(cameraBeltControlArmed).catch(() => {});
+        updateCameraAutomationStatus({ state: cameraBeltControlArmed ? 'watching' : 'disarmed' });
+      }
+
+      function disarmCameraBeltControl() {
+        cameraBeltControlArmed = false;
+        cameraBeltControlCheckbox.checked = false;
+        if (cameraBeltController) cameraBeltController.setArmed(false).catch(() => {});
+        updateCameraAutomationStatus({ state: controlsAvailable ? 'disarmed' : 'disconnected' });
+      }
 
       let device, server, ftms;
       let chCtrl, chData, chSpeedRange;
@@ -1717,18 +1831,22 @@
         treadmillRunning = false;
         speedRangeAvailable = false;
         setSlowestActive(false);
+        disarmCameraBeltControl();
         log('Disconnected');
         setControlsEnabled(false);
       }
 
       function setControlsEnabled(enabled) {
         controlsAvailable = enabled;
+        if (!enabled && cameraBeltControlArmed) disarmCameraBeltControl();
         ui('btnStart').disabled = !enabled;
         ui('btnStop').disabled  = !enabled;
         ui('btnConnect').hidden = enabled;
         ui('btnDisconnect').hidden = !enabled;
+        cameraBeltControlCheckbox.disabled = !enabled;
         updateSlowestButton();
         updateSessionActionAvailability();
+        if (cameraBeltController) cameraBeltController.setConnected(enabled).catch(() => {});
       }
 
       function onTreadmillData(event) {
@@ -1919,7 +2037,7 @@
         scheduleTargetSpeedCommand();
       }
 
-      async function start() {
+      async function start({ reason = 'manual' } = {}) {
         const RAMP_UP_DELAY_MS = 5000; // 5 seconds
 
         const startRampGeneration = ++rampUpGeneration;
@@ -1933,7 +2051,7 @@
             treadmillRunning = true;
             updateSlowestButton();
             log('Start command confirmed');
-            beginOrResumeSession();
+            beginOrResumeSession({ cameraControlled: reason === 'camera-presence' });
     
             const initialSpeed = 1.0;
             const value = Math.round(initialSpeed * 100);
@@ -1962,6 +2080,7 @@
             setSlowestActive(false);
             setControlsEnabled(false);
             log(e.message, 'error');
+            throw e;
         }
       }
 
@@ -1988,16 +2107,24 @@
         }
       }
 
-      async function stop({ showSessionActions = false } = {}) {
+      async function stop({ showSessionActions = false, reason = 'manual' } = {}) {
         rampUpGeneration += 1;
         clearTimeout(rampUpTimeout); // Clear the ramp-up timeout
         rampUpTimeout = null;
         cancelTargetSpeedThrottle();
+        const wasRunning = treadmillRunning;
         treadmillRunning = false;
         setSlowestActive(false);
-        await writeControl(OP_STOP_OR_PAUSE, new Uint8Array([0x01]));
-        log('Stop command confirmed');
-        const stoppedSession = completeSession();
+        try {
+          await writeControl(OP_STOP_OR_PAUSE, new Uint8Array([0x01]));
+        } catch (error) {
+          treadmillRunning = wasRunning;
+          updateSlowestButton();
+          throw error;
+        }
+        const cameraControlledStop = reason === 'camera-presence' || reason === 'camera-signal-lost';
+        log(cameraControlledStop ? 'Camera confirmed the belt is stopped' : 'Stop command confirmed');
+        const stoppedSession = cameraControlledStop ? (pauseCameraTimedSession(), null) : completeSession();
         if (showSessionActions && stoppedSession) openSessionActionDialog(stoppedSession);
       }
 
@@ -2016,6 +2143,22 @@
       }
 
       // ===== wire up UI =====
+      cameraBeltController = new CameraBeltController({
+        start: (options) => start(options),
+        stop: (options) => stop(options),
+        isConnected: () => controlsAvailable,
+        isRunning: () => treadmillRunning,
+        onState: updateCameraAutomationStatus
+      });
+      cameraBeltControlCheckbox.disabled = true;
+      cameraBeltControlCheckbox.addEventListener('change', () => {
+        if (cameraBeltControlCheckbox.checked && !controlsAvailable) {
+          cameraBeltControlCheckbox.checked = false;
+          updateCameraAutomationStatus({ state: 'disconnected' });
+          return;
+        }
+        setCameraBeltControlArmed(cameraBeltControlCheckbox.checked);
+      });
       ui('btnConnect').addEventListener('click', () => {
         connect().catch(e => {
             console.error('Connection failed:', e);
@@ -2041,6 +2184,7 @@
         });
       });
       ui('btnStop').addEventListener('click',  () => {
+        disarmCameraBeltControl();
         stop({ showSessionActions: true }).catch(e => {
             console.error('Stop command failed:', e);
             setControlsEnabled(false);
@@ -2060,8 +2204,28 @@
         adjustTargetSpeed(-0.1);
       });
       window.addEventListener('camera-presence-stable', (event) => {
-        if (event.detail?.state === 'occupied') beginCameraTimedSession();
-        if (event.detail?.state === 'empty') completeCameraTimedSession();
+        const state = event.detail?.state;
+        if (state !== 'occupied' && state !== 'empty') return;
+        const controlPromise = cameraBeltController.handlePresence(state);
+        if (!cameraBeltControlArmed) {
+          controlPromise.catch(() => {});
+          if (state === 'occupied') beginCameraTimedSession();
+          if (state === 'empty') completeCameraTimedSession();
+          return;
+        }
+        if (state === 'occupied' && treadmillRunning && !getInProgressSession()) beginCameraTimedSession();
+        if (state === 'empty' && !treadmillRunning) pauseCameraTimedSession();
+        controlPromise.catch((error) => {
+          log(`Camera belt control failed: ${error.message}`, 'error');
+          disarmCameraBeltControl();
+        });
+      });
+      window.addEventListener('camera-signal-lost', (event) => {
+        if (!cameraBeltControlArmed) return;
+        cameraBeltController.handleSignalLost().catch((error) => {
+          log(`Unable to stop the belt after camera loss: ${error.message}`, 'error');
+          disarmCameraBeltControl();
+        });
       });
       setInterval(updateCameraTimedSessionDisplay, 1000);
       const clearHistoryButton = ui('btnClearHistory');
@@ -2236,6 +2400,7 @@
           || (session.endedAt === null || session.endedAt === undefined) && treadmillRunning && activeSessionId === session.id;
         if (isActive) {
           closeSessionActionDialog();
+          disarmCameraBeltControl();
           stop().catch((error) => {
             console.error('Resume stop command failed:', error);
             setControlsEnabled(false);

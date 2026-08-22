@@ -106,6 +106,10 @@ function cameraReadError(error) {
   return message;
 }
 
+function signalCameraLost(reason) {
+  window.dispatchEvent(new CustomEvent('camera-signal-lost', { detail: { reason } }));
+}
+
 function drawPreview() {
   if (!latestFrame) return;
   const canvas = elements.canvas;
@@ -167,6 +171,7 @@ function initializeWorker() {
   worker.addEventListener('message', handleWorkerMessage);
   worker.addEventListener('error', (event) => {
     inferencePending = false;
+    signalCameraLost('person detector failed');
     setStatus(`Person detector failed: ${event.message}`, 'error');
     scheduleNextFrame(5000);
   });
@@ -187,6 +192,7 @@ function handleWorkerMessage(event) {
   }
   inferencePending = false;
   if (message.type === 'error') {
+    signalCameraLost(message.message);
     setStatus(`Person detector failed: ${message.message}`, 'error');
     scheduleNextFrame(5000);
     return;
@@ -198,7 +204,7 @@ function handleWorkerMessage(event) {
   const stable = stabilizer.update(message.present);
   const confidence = Math.round(message.confidence * 100);
   if (stable.state === 'occupied') {
-    setStatus(`Person detected (${confidence}% confidence). Stopwatch running.`, 'active');
+    setStatus(`Person detected (${confidence}% confidence). Presence confirmed.`, 'active');
   } else if (stable.state === 'empty') {
     setStatus('Treadmill is empty. Waiting for a person.', 'empty');
   } else {
@@ -253,6 +259,7 @@ async function runDetectionCycle() {
     worker.postMessage({ type: 'detect', bitmap: inferenceBitmap, region: config.region }, [inferenceBitmap]);
   } catch (error) {
     inferencePending = false;
+    signalCameraLost(cameraReadError(error));
     setStatus(cameraReadError(error), 'error');
     scheduleNextFrame(5000);
   }
@@ -278,6 +285,7 @@ function enableCameraTiming() {
 }
 
 function disableCameraTiming() {
+  if (enabled) signalCameraLost('camera timing disabled');
   enabled = false;
   runGeneration += 1;
   config.enabled = false;
@@ -348,6 +356,11 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && enabled) {
     clearTimeout(frameTimer);
     runDetectionCycle();
+  } else if (document.hidden && enabled) {
+    stabilizer.reset();
+    latestDetection = null;
+    signalCameraLost('page hidden');
+    drawPreview();
   }
 });
 
