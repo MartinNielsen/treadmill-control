@@ -1,5 +1,11 @@
 export const DEFAULT_CAMERA_URL = 'http://teslamate2host:1984/api/stream.mjpeg?src=printer_cam';
 
+export function formatDebugTimestamp(timestamp = Date.now()) {
+  const date = new Date(timestamp);
+  const pad = (value, length = 2) => String(value).padStart(length, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}
+
 export function toSnapshotUrl(value, baseUrl = globalThis.location?.href || 'http://localhost/') {
   const url = new URL(String(value || '').trim(), baseUrl);
   if (url.pathname.endsWith('/api/stream.mjpeg')) {

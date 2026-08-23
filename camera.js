@@ -1,13 +1,16 @@
 import {
   DEFAULT_CAMERA_URL,
+  formatDebugTimestamp,
   PresenceStabilizer,
   normalizeRegion,
   toSnapshotUrl
 } from './camera-utils.js';
 
 const CONFIG_KEY = 'treadmillControl:cameraTiming';
-const FRAME_INTERVAL_MS = 1200;
-const stabilizer = new PresenceStabilizer({ presentFrames: 3, absentFrames: 5 });
+const FRAME_INTERVAL_MS = 500;
+const PREVIEW_REPLACEMENT_DELAY_MS = 300;
+const DEFAULT_PREVIEW_SIZE = { width: 640, height: 360 };
+const stabilizer = new PresenceStabilizer({ presentFrames: 2, absentFrames: 3 });
 
 const elements = {
   form: document.getElementById('cameraForm'),
@@ -36,17 +39,35 @@ let dragStart = null;
 
 elements.url.value = config.url;
 
+function normalizePreviewSize(size) {
+  const width = Number(size?.width);
+  const height = Number(size?.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    return { ...DEFAULT_PREVIEW_SIZE };
+  }
+  return {
+    width: Math.min(640, Math.max(1, Math.round(width))),
+    height: Math.max(1, Math.round(height))
+  };
+}
+
 function loadConfig() {
   try {
     const stored = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
     return {
       url: typeof stored.url === 'string' && stored.url.trim() ? stored.url : DEFAULT_CAMERA_URL,
       region: normalizeRegion(stored.region),
+      previewSize: normalizePreviewSize(stored.previewSize),
       enabled: stored.enabled === true
     };
   } catch (error) {
     console.warn('Unable to load camera timing settings:', error);
-    return { url: DEFAULT_CAMERA_URL, region: normalizeRegion(null), enabled: false };
+    return {
+      url: DEFAULT_CAMERA_URL,
+      region: normalizeRegion(null),
+      previewSize: { ...DEFAULT_PREVIEW_SIZE },
+      enabled: false
+    };
   }
 }
 
@@ -59,7 +80,7 @@ function saveConfig() {
 }
 
 function setStatus(message, tone = 'idle') {
-  elements.status.textContent = message;
+  elements.status.textContent = `[${formatDebugTimestamp()}] ${message}`;
   elements.badge.textContent = tone === 'active'
     ? 'Person'
     : tone === 'empty'
@@ -138,15 +159,35 @@ function drawPreview() {
   }
 }
 
+function setPreviewSize(width, height, { forcePersist = false } = {}) {
+  const nextSize = normalizePreviewSize({ width, height });
+  const changed = config.previewSize.width !== nextSize.width || config.previewSize.height !== nextSize.height;
+  elements.canvas.width = nextSize.width;
+  elements.canvas.height = nextSize.height;
+  if (changed || forcePersist) {
+    config.previewSize = nextSize;
+    saveConfig();
+  }
+}
+
 async function showFrame(blob) {
   const bitmap = await createImageBitmap(blob);
   if (latestFrame) latestFrame.close();
   latestFrame = bitmap;
   const maxWidth = Math.min(640, bitmap.width);
-  elements.canvas.width = maxWidth;
-  elements.canvas.height = Math.max(1, Math.round(maxWidth * bitmap.height / bitmap.width));
+  setPreviewSize(maxWidth, Math.max(1, Math.round(maxWidth * bitmap.height / bitmap.width)), { forcePersist: true });
   elements.previewWrap.hidden = false;
   drawPreview();
+  updateButtons();
+}
+
+function clearPreview() {
+  if (latestFrame) latestFrame.close();
+  latestFrame = null;
+  latestDetection = null;
+  setPreviewSize(config.previewSize.width, config.previewSize.height);
+  context.clearRect(0, 0, elements.canvas.width, elements.canvas.height);
+  elements.previewWrap.hidden = false;
   updateButtons();
 }
 
@@ -154,13 +195,18 @@ async function testCamera() {
   config.url = elements.url.value.trim();
   config.enabled = false;
   saveConfig();
+  clearPreview();
+  elements.test.disabled = true;
   setStatus('Loading camera preview…');
   try {
+    await new Promise((resolve) => setTimeout(resolve, PREVIEW_REPLACEMENT_DELAY_MS));
     const blob = await fetchFrameBlob();
     await showFrame(blob);
     setStatus('Camera ready. Drag over the image to select the treadmill area.', 'ready');
   } catch (error) {
     setStatus(cameraReadError(error), 'error');
+  } finally {
+    updateButtons();
   }
 }
 
@@ -251,8 +297,7 @@ async function runDetectionCycle() {
     if (latestFrame) latestFrame.close();
     latestFrame = previewBitmap;
     const maxWidth = Math.min(640, previewBitmap.width);
-    elements.canvas.width = maxWidth;
-    elements.canvas.height = Math.max(1, Math.round(maxWidth * previewBitmap.height / previewBitmap.width));
+    setPreviewSize(maxWidth, Math.max(1, Math.round(maxWidth * previewBitmap.height / previewBitmap.width)));
     elements.previewWrap.hidden = false;
     drawPreview();
     updateButtons();
@@ -365,4 +410,6 @@ document.addEventListener('visibilitychange', () => {
 });
 
 updateButtons();
+setPreviewSize(config.previewSize.width, config.previewSize.height);
+elements.previewWrap.hidden = false;
 if (config.enabled) enableCameraTiming();

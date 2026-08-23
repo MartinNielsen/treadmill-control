@@ -1089,6 +1089,7 @@
 
     (async () => {
       const { CameraBeltController } = await import('./camera-belt-controller.js');
+      const { formatDebugTimestamp } = await import('./camera-utils.js');
       // ======= Assigned Numbers (16-bit UUIDs) =======
       const FTMS_SERVICE                = 0x1826; // Fitness Machine Service
       const SESSION_HISTORY_KEY         = 'treadmillSessionHistory';
@@ -1492,7 +1493,7 @@
 
       const log = (m, level="") => {
         const el = ui('log');
-        el.textContent += m + "\n";
+        el.textContent += `[${formatDebugTimestamp()}] ${m}\n`;
         el.scrollTop = el.scrollHeight;
         el.hidden = false;
         ui('operationalStatus').textContent = m;
@@ -1515,7 +1516,7 @@
           stopped: 'Belt is stopped. Waiting for a person to return.',
           error: `Automatic belt control failed: ${detail.error?.message || 'unknown error'}.`
         };
-        cameraAutomationStatus.textContent = messages[detail.state] || messages.disarmed;
+        cameraAutomationStatus.textContent = `[${formatDebugTimestamp()}] ${messages[detail.state] || messages.disarmed}`;
       }
 
       function setCameraBeltControlArmed(armed) {
