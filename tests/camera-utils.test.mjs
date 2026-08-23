@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   PresenceStabilizer,
   normalizeRegion,
+  toMjpegUrl,
   toSnapshotUrl
 } from '../camera-utils.js';
 
@@ -25,6 +26,21 @@ test('preserves explicit snapshot sizing', () => {
   ));
   assert.equal(result.searchParams.get('w'), '320');
   assert.equal(result.searchParams.has('width'), false);
+});
+
+test('keeps an MJPEG stream URL persistent and sized for the detector', () => {
+  const result = new URL(toMjpegUrl(
+    'http://camera-host:1984/api/stream.mjpeg?src=printer_cam&_cameraFrame=123',
+    'http://localhost/'
+  ));
+  assert.equal(result.pathname, '/api/stream.mjpeg');
+  assert.equal(result.searchParams.get('src'), 'printer_cam');
+  assert.equal(result.searchParams.get('width'), '640');
+  assert.equal(result.searchParams.has('_cameraFrame'), false);
+});
+
+test('does not convert non-MJPEG URLs into a persistent stream', () => {
+  assert.equal(toMjpegUrl('http://camera-host:1984/api/frame.jpeg?src=printer_cam'), null);
 });
 
 test('rejects unsupported camera URLs', () => {

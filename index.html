@@ -1093,6 +1093,7 @@
       // ======= Assigned Numbers (16-bit UUIDs) =======
       const FTMS_SERVICE                = 0x1826; // Fitness Machine Service
       const SESSION_HISTORY_KEY         = 'treadmillSessionHistory';
+      const CAMERA_BELT_CONTROL_KEY     = 'treadmillControl:cameraBeltControl';
       const LEGACY_TARGET_SPEED_KEY     = 'targetSpeed';
       const DEVICE_TARGET_SPEED_PREFIX  = 'treadmillControl:targetSpeed:';
       const CH_TREADMILL_DATA           = 0x2ACD; // notifications with speed, etc.
@@ -1501,8 +1502,27 @@
 
       const cameraBeltControlCheckbox = ui('cameraBeltControl');
       const cameraAutomationStatus = ui('cameraAutomationStatus');
+      let cameraBeltControlPreference = loadCameraBeltControlPreference();
       let cameraBeltControlArmed = false;
       let cameraBeltController = null;
+
+      function loadCameraBeltControlPreference() {
+        try {
+          return localStorage.getItem(CAMERA_BELT_CONTROL_KEY) === 'true';
+        } catch (error) {
+          console.warn('Unable to load automatic belt-control preference:', error);
+          return false;
+        }
+      }
+
+      function saveCameraBeltControlPreference(value) {
+        cameraBeltControlPreference = Boolean(value);
+        try {
+          localStorage.setItem(CAMERA_BELT_CONTROL_KEY, String(cameraBeltControlPreference));
+        } catch (error) {
+          console.warn('Unable to save automatic belt-control preference:', error);
+        }
+      }
 
       function updateCameraAutomationStatus(detail = {}) {
         const messages = {
@@ -1519,8 +1539,10 @@
         cameraAutomationStatus.textContent = `[${formatDebugTimestamp()}] ${messages[detail.state] || messages.disarmed}`;
       }
 
-      function setCameraBeltControlArmed(armed) {
-        cameraBeltControlArmed = Boolean(armed) && controlsAvailable;
+      function setCameraBeltControlArmed(armed, { remember = true } = {}) {
+        const requested = Boolean(armed);
+        if (remember) saveCameraBeltControlPreference(requested);
+        cameraBeltControlArmed = requested && controlsAvailable;
         cameraBeltControlCheckbox.checked = cameraBeltControlArmed;
         if (cameraBeltController) cameraBeltController.setArmed(cameraBeltControlArmed).catch(() => {});
         updateCameraAutomationStatus({ state: cameraBeltControlArmed ? 'watching' : 'disarmed' });
@@ -1847,7 +1869,15 @@
         cameraBeltControlCheckbox.disabled = !enabled;
         updateSlowestButton();
         updateSessionActionAvailability();
-        if (cameraBeltController) cameraBeltController.setConnected(enabled).catch(() => {});
+        if (cameraBeltController) {
+          cameraBeltController.setConnected(enabled)
+            .then(() => {
+              if (enabled && cameraBeltControlPreference) {
+                setCameraBeltControlArmed(true, { remember: false });
+              }
+            })
+            .catch(() => {});
+        }
       }
 
       function onTreadmillData(event) {
@@ -2152,6 +2182,7 @@
         onState: updateCameraAutomationStatus
       });
       cameraBeltControlCheckbox.disabled = true;
+      cameraBeltControlCheckbox.checked = cameraBeltControlPreference;
       cameraBeltControlCheckbox.addEventListener('change', () => {
         if (cameraBeltControlCheckbox.checked && !controlsAvailable) {
           cameraBeltControlCheckbox.checked = false;

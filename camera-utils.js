@@ -21,6 +21,16 @@ export function toSnapshotUrl(value, baseUrl = globalThis.location?.href || 'htt
   return url.href;
 }
 
+export function toMjpegUrl(value, baseUrl = globalThis.location?.href || 'http://localhost/') {
+  const url = new URL(String(value || '').trim(), baseUrl);
+  if (!url.pathname.endsWith('/api/stream.mjpeg')) return null;
+  if (!url.searchParams.has('width') && !url.searchParams.has('w')) {
+    url.searchParams.set('width', '640');
+  }
+  url.searchParams.delete('_cameraFrame');
+  return url.href;
+}
+
 export function normalizeRegion(region) {
   if (!region || !['x', 'y', 'width', 'height'].every((key) => Number.isFinite(region[key]))) {
     return { x: 0, y: 0, width: 1, height: 1 };

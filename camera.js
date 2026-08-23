@@ -3,6 +3,7 @@ import {
   formatDebugTimestamp,
   PresenceStabilizer,
   normalizeRegion,
+  toMjpegUrl,
   toSnapshotUrl
 } from './camera-utils.js';
 
@@ -36,6 +37,9 @@ let frameTimer = null;
 let latestFrame = null;
 let latestDetection = null;
 let dragStart = null;
+let mjpegImage = null;
+let mjpegUrl = '';
+let mjpegReadyPromise = null;
 
 elements.url.value = config.url;
 
@@ -119,6 +123,42 @@ async function fetchFrameBlob() {
   return blob;
 }
 
+function closeMjpegStream() {
+  if (mjpegImage) {
+    mjpegImage.onload = null;
+    mjpegImage.onerror = null;
+    mjpegImage.src = '';
+  }
+  mjpegImage = null;
+  mjpegUrl = '';
+  mjpegReadyPromise = null;
+}
+
+function ensureMjpegStream(url) {
+  if (mjpegImage && mjpegUrl === url) {
+    return mjpegReadyPromise || Promise.resolve(mjpegImage);
+  }
+
+  closeMjpegStream();
+  const image = new Image();
+  image.crossOrigin = 'anonymous';
+  image.decoding = 'async';
+  mjpegImage = image;
+  mjpegUrl = url;
+  mjpegReadyPromise = new Promise((resolve, reject) => {
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('MJPEG stream could not be read.'));
+  });
+  image.src = url;
+  return mjpegReadyPromise;
+}
+
+async function getFrameSource() {
+  const mjpegUrlForConfig = toMjpegUrl(config.url);
+  if (mjpegUrlForConfig) return ensureMjpegStream(mjpegUrlForConfig);
+  return fetchFrameBlob();
+}
+
 function cameraReadError(error) {
   const message = error?.message || String(error);
   if (/Failed to fetch|Load failed|NetworkError|fetch/i.test(message)) {
@@ -170,8 +210,8 @@ function setPreviewSize(width, height, { forcePersist = false } = {}) {
   }
 }
 
-async function showFrame(blob) {
-  const bitmap = await createImageBitmap(blob);
+async function showFrame(source) {
+  const bitmap = await createImageBitmap(source);
   if (latestFrame) latestFrame.close();
   latestFrame = bitmap;
   const maxWidth = Math.min(640, bitmap.width);
@@ -200,8 +240,8 @@ async function testCamera() {
   setStatus('Loading camera preview…');
   try {
     await new Promise((resolve) => setTimeout(resolve, PREVIEW_REPLACEMENT_DELAY_MS));
-    const blob = await fetchFrameBlob();
-    await showFrame(blob);
+    const source = await getFrameSource();
+    await showFrame(source);
     setStatus('Camera ready. Drag over the image to select the treadmill area.', 'ready');
   } catch (error) {
     setStatus(cameraReadError(error), 'error');
@@ -283,10 +323,10 @@ async function runDetectionCycle() {
   inferencePending = true;
   const generation = runGeneration;
   try {
-    const blob = await fetchFrameBlob();
+    const source = await getFrameSource();
     const [previewBitmap, inferenceBitmap] = await Promise.all([
-      createImageBitmap(blob),
-      createImageBitmap(blob)
+      createImageBitmap(source),
+      createImageBitmap(source)
     ]);
     if (!enabled || generation !== runGeneration) {
       previewBitmap.close();
@@ -303,6 +343,7 @@ async function runDetectionCycle() {
     updateButtons();
     worker.postMessage({ type: 'detect', bitmap: inferenceBitmap, region: config.region }, [inferenceBitmap]);
   } catch (error) {
+    closeMjpegStream();
     inferencePending = false;
     signalCameraLost(cameraReadError(error));
     setStatus(cameraReadError(error), 'error');
@@ -341,6 +382,7 @@ function disableCameraTiming() {
   if (worker) worker.terminate();
   worker = null;
   workerReady = false;
+  closeMjpegStream();
   saveConfig();
   updateButtons();
   drawPreview();
@@ -404,6 +446,7 @@ document.addEventListener('visibilitychange', () => {
   } else if (document.hidden && enabled) {
     stabilizer.reset();
     latestDetection = null;
+    closeMjpegStream();
     signalCameraLost('page hidden');
     drawPreview();
   }
