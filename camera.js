@@ -307,14 +307,6 @@ function handleWorkerMessage(event) {
   const confidence = Math.round(message.confidence * 100);
   const confirmingPerson = message.present && stable.state !== 'occupied';
   const nextDelay = confirmingPerson ? PERSON_CONFIRMATION_INTERVAL_MS : FRAME_INTERVAL_MS;
-  cameraDebug('detection', {
-    present: message.present,
-    confidence,
-    stableState: stable.state,
-    stableCount: stable.count,
-    stableRequired: stable.required,
-    nextDelayMs: nextDelay
-  });
   if (stable.state === 'occupied') {
     setStatus(`Person detected (${confidence}% confidence). Presence confirmed.`, 'active');
   } else if (stable.state === 'empty') {
