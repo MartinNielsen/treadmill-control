@@ -1560,14 +1560,21 @@
       let targetKph = 0.0; // our local target speed in km/h
       let minKph = 0, maxKph = 20, stepKph = 0.1; // defaults until we read Supported Speed Range
       let currentSpeedKph = 0.0;
+      let hasSpeedTelemetry = false;
       let rampUpTimeout;
       let rampUpGeneration = 0;
       const TARGET_SPEED_THROTTLE_MS = 500;
+      const CAMERA_SPEED_TOLERANCE_KPH = 0.2;
+      const CAMERA_SPEED_REASSERT_INTERVAL_MS = 2000;
+      const CAMERA_STOPPED_SPEED_THRESHOLD_KPH = 0.1;
+      const CAMERA_STARTUP_GRACE_MS = 7000;
       let targetSpeedThrottleTimer = null;
       let targetSpeedCommandPending = false;
       let targetSpeedCommandActive = false;
       let targetSpeedRequestGeneration = 0;
       let lastTargetSpeedCommandAt = -Infinity;
+      let lastCameraSpeedEnsureAt = -Infinity;
+      let lastStartCommandAt = -Infinity;
       let controlPointPending = null;
       let controlPointQueue = Promise.resolve();
       let controlsAvailable = false;
@@ -1707,6 +1714,7 @@
             && values.instantaneousSpeed >= 0 && values.instantaneousSpeed < 100) {
           ui('speed').textContent = values.instantaneousSpeed.toFixed(1);
           currentSpeedKph = values.instantaneousSpeed;
+          hasSpeedTelemetry = true;
           setMetricVisible('metricInstantaneousSpeed', true);
         }
         updateInProgressSessionMetrics();
@@ -1752,6 +1760,7 @@
       async function connect() {
         resetLiveMetrics();
         treadmillRunning = false;
+        hasSpeedTelemetry = false;
         speedRangeAvailable = false;
         setSlowestActive(false);
         setControlsEnabled(false);
@@ -1852,6 +1861,7 @@
         rampUpTimeout = null;
         cancelTargetSpeedThrottle();
         treadmillRunning = false;
+        hasSpeedTelemetry = false;
         speedRangeAvailable = false;
         setSlowestActive(false);
         disarmCameraBeltControl();
@@ -2068,9 +2078,31 @@
         scheduleTargetSpeedCommand();
       }
 
+      async function ensureCameraBeltRunning({ reason = 'camera-presence' } = {}) {
+        if (!controlsAvailable || !treadmillRunning) return;
+
+        const now = Date.now();
+        if (now - lastStartCommandAt < CAMERA_STARTUP_GRACE_MS) return;
+
+        if (hasSpeedTelemetry && currentSpeedKph <= CAMERA_STOPPED_SPEED_THRESHOLD_KPH) {
+          log('Camera detected that the belt has stopped; sending Start/Resume');
+          await start({ reason });
+          return;
+        }
+
+        if (now - lastCameraSpeedEnsureAt < CAMERA_SPEED_REASSERT_INTERVAL_MS) return;
+        if (hasSpeedTelemetry && currentSpeedKph >= targetKph - CAMERA_SPEED_TOLERANCE_KPH) return;
+
+        lastCameraSpeedEnsureAt = now;
+        if (slowestActive) setSlowestActive(false);
+        await writeTargetSpeedCommand(Math.round(targetKph * 100));
+        log(`Camera reasserted target speed at ${targetKph.toFixed(1)} km/h`);
+      }
+
       async function start({ reason = 'manual' } = {}) {
         const RAMP_UP_DELAY_MS = 5000; // 5 seconds
 
+        lastStartCommandAt = Date.now();
         const startRampGeneration = ++rampUpGeneration;
         clearTimeout(rampUpTimeout);
         rampUpTimeout = null;
@@ -2177,6 +2209,7 @@
       cameraBeltController = new CameraBeltController({
         start: (options) => start(options),
         stop: (options) => stop(options),
+        ensureRunning: (options) => ensureCameraBeltRunning(options),
         isConnected: () => controlsAvailable,
         isRunning: () => treadmillRunning,
         onState: updateCameraAutomationStatus
@@ -2238,16 +2271,24 @@
       window.addEventListener('camera-presence-stable', (event) => {
         const state = event.detail?.state;
         if (state !== 'occupied' && state !== 'empty') return;
-        const controlPromise = cameraBeltController.handlePresence(state);
         if (!cameraBeltControlArmed) {
-          controlPromise.catch(() => {});
           if (state === 'occupied') beginCameraTimedSession();
           if (state === 'empty') completeCameraTimedSession();
           return;
         }
         if (state === 'occupied' && treadmillRunning && !getInProgressSession()) beginCameraTimedSession();
-        if (state === 'empty' && !treadmillRunning) pauseCameraTimedSession();
-        controlPromise.catch((error) => {
+        if (state === 'empty') {
+          if (!treadmillRunning) pauseCameraTimedSession();
+          cameraBeltController.handlePresence('empty').catch((error) => {
+            log(`Camera belt control failed: ${error.message}`, 'error');
+            disarmCameraBeltControl();
+          });
+        }
+      });
+      window.addEventListener('camera-presence-positive', () => {
+        if (!cameraBeltControlArmed) return;
+        if (treadmillRunning && !getInProgressSession()) beginCameraTimedSession();
+        cameraBeltController.handlePresence('occupied').catch((error) => {
           log(`Camera belt control failed: ${error.message}`, 'error');
           disarmCameraBeltControl();
         });

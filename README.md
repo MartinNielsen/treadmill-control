@@ -4,7 +4,7 @@ Send Bluetooth commands to an FTMS treadmill from a web page.
 
 ## Camera-assisted timing
 
-The optional camera monitor runs entirely in the browser. It reads periodic JPEG snapshots from a go2rtc stream and detects the `person` class with a self-hosted MediaPipe EfficientDet-Lite0 model. Timing works without belt control; an explicit automatic-control arm can also true-stop the belt when the treadmill is empty and start/resume it when a person returns.
+The optional camera monitor runs entirely in the browser. It reads periodic JPEG snapshots from a go2rtc stream and detects the `person` class with a self-hosted MediaPipe EfficientDet-Lite0 model. Timing works without belt control; an explicit automatic-control arm can also true-stop the belt when the treadmill is empty and start/resume it when a person returns. Empty detection is confirmed over six consecutive camera frames (about three seconds at the default interval), while each positive stable frame reconciles the belt and reasserts the target speed if telemetry shows it slowing down.
 
 For a go2rtc stream such as:
 

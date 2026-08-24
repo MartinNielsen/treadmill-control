@@ -1,6 +1,8 @@
 import {
   DEFAULT_CAMERA_URL,
   formatDebugTimestamp,
+  CAMERA_EMPTY_CONFIRMATION_FRAMES,
+  CAMERA_PRESENT_CONFIRMATION_FRAMES,
   PresenceStabilizer,
   normalizeRegion,
   toMjpegUrl,
@@ -11,7 +13,10 @@ const CONFIG_KEY = 'treadmillControl:cameraTiming';
 const FRAME_INTERVAL_MS = 500;
 const PREVIEW_REPLACEMENT_DELAY_MS = 300;
 const DEFAULT_PREVIEW_SIZE = { width: 640, height: 360 };
-const stabilizer = new PresenceStabilizer({ presentFrames: 2, absentFrames: 3 });
+const stabilizer = new PresenceStabilizer({
+  presentFrames: CAMERA_PRESENT_CONFIRMATION_FRAMES,
+  absentFrames: CAMERA_EMPTY_CONFIRMATION_FRAMES
+});
 
 const elements = {
   form: document.getElementById('cameraForm'),
@@ -300,6 +305,11 @@ function handleWorkerMessage(event) {
 
   if (stable.changed) {
     window.dispatchEvent(new CustomEvent('camera-presence-stable', {
+      detail: { state: stable.state, confidence: message.confidence }
+    }));
+  }
+  if (message.present && stable.state === 'occupied') {
+    window.dispatchEvent(new CustomEvent('camera-presence-positive', {
       detail: { state: stable.state, confidence: message.confidence }
     }));
   }

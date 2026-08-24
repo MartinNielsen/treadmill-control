@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  CAMERA_EMPTY_CONFIRMATION_FRAMES,
+  CAMERA_PRESENT_CONFIRMATION_FRAMES,
   PresenceStabilizer,
   normalizeRegion,
   toMjpegUrl,
@@ -67,6 +69,23 @@ test('requires consecutive observations before changing stable presence', () => 
   assert.equal(occupied.state, 'occupied');
   assert.equal(occupied.changed, true);
   assert.equal(state.update(false).state, 'occupied');
+  const empty = state.update(false);
+  assert.equal(empty.state, 'empty');
+  assert.equal(empty.changed, true);
+});
+
+test('requires the longer empty confirmation window used by camera control', () => {
+  const state = new PresenceStabilizer({
+    presentFrames: CAMERA_PRESENT_CONFIRMATION_FRAMES,
+    absentFrames: CAMERA_EMPTY_CONFIRMATION_FRAMES
+  });
+
+  for (let index = 0; index < CAMERA_PRESENT_CONFIRMATION_FRAMES; index += 1) {
+    state.update(true);
+  }
+  for (let index = 0; index < CAMERA_EMPTY_CONFIRMATION_FRAMES - 1; index += 1) {
+    assert.equal(state.update(false).state, 'occupied');
+  }
   const empty = state.update(false);
   assert.equal(empty.state, 'empty');
   assert.equal(empty.changed, true);

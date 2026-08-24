@@ -1,7 +1,8 @@
 export class CameraBeltController {
-  constructor({ start, stop, isConnected, isRunning, onState = () => {} }) {
+  constructor({ start, stop, ensureRunning = null, isConnected, isRunning, onState = () => {} }) {
     this.start = start;
     this.stop = stop;
+    this.ensureRunning = ensureRunning;
     this.isConnected = isConnected;
     this.isRunning = isRunning;
     this.onState = onState;
@@ -48,6 +49,7 @@ export class CameraBeltController {
   desiredAction() {
     if (!this.armed || !this.isConnected()) return null;
     if (this.presence === 'occupied' && !this.isRunning()) return 'start';
+    if (this.presence === 'occupied' && this.isRunning() && this.ensureRunning) return 'ensure-running';
     if (this.presence === 'empty' && this.isRunning()) return 'stop';
     return null;
   }
@@ -67,8 +69,13 @@ export class CameraBeltController {
 
   enqueue(action, reason) {
     if (this.pending) return this.pending;
-    this.publish(action === 'start' ? 'starting' : 'stopping', { reason });
-    const operation = (action === 'start' ? this.start : this.stop)({ reason })
+    if (action === 'start') this.publish('starting', { reason });
+    if (action === 'stop') this.publish('stopping', { reason });
+    const operation = (action === 'start'
+      ? this.start
+      : action === 'stop'
+        ? this.stop
+        : this.ensureRunning)({ reason })
       .then(() => {
         this.publish(this.isRunning() ? 'running' : 'stopped', { reason });
       })
@@ -80,7 +87,8 @@ export class CameraBeltController {
     const pending = this.pending;
     this.pending = pending.finally(() => {
         this.pending = null;
-        if (this.desiredAction()) this.reconcile().catch(() => {});
+        const nextAction = this.desiredAction();
+        if (nextAction && nextAction !== 'ensure-running') this.reconcile().catch(() => {});
       });
     return this.pending;
   }

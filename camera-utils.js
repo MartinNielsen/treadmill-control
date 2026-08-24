@@ -1,4 +1,6 @@
 export const DEFAULT_CAMERA_URL = 'http://teslamate2host:1984/api/stream.mjpeg?src=printer_cam';
+export const CAMERA_PRESENT_CONFIRMATION_FRAMES = 2;
+export const CAMERA_EMPTY_CONFIRMATION_FRAMES = 6;
 
 export function formatDebugTimestamp(timestamp = Date.now()) {
   const date = new Date(timestamp);
@@ -43,7 +45,7 @@ export function normalizeRegion(region) {
 }
 
 export class PresenceStabilizer {
-  constructor({ presentFrames = 3, absentFrames = 5 } = {}) {
+  constructor({ presentFrames = CAMERA_PRESENT_CONFIRMATION_FRAMES, absentFrames = CAMERA_EMPTY_CONFIRMATION_FRAMES } = {}) {
     this.presentFrames = presentFrames;
     this.absentFrames = absentFrames;
     this.reset();

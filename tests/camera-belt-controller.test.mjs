@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CameraBeltController } from '../camera-belt-controller.js';
 
-function createHarness({ startDelay = 0 } = {}) {
+function createHarness({ startDelay = 0, ensureRunning = null } = {}) {
   let connected = true;
   let running = false;
   const commands = [];
@@ -25,6 +25,7 @@ function createHarness({ startDelay = 0 } = {}) {
   const controller = new CameraBeltController({
     start,
     stop,
+    ensureRunning,
     isConnected: () => connected,
     isRunning: () => running,
     onState: (state) => states.push(state.state)
@@ -66,6 +67,22 @@ test('a presence change during start is reconciled after the start completes', a
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(harness.commands, ['start', 'stop']);
+});
+
+test('repeated positive presence can reconcile a running belt', async () => {
+  const repairs = [];
+  const harness = createHarness({
+    ensureRunning: async () => {
+      repairs.push('ensure-running');
+    }
+  });
+  harness.controller.setArmed(true);
+
+  await harness.controller.handlePresence('occupied');
+  await harness.controller.handlePresence('occupied');
+
+  assert.deepEqual(harness.commands, ['start']);
+  assert.deepEqual(repairs, ['ensure-running']);
 });
 
 test('camera signal loss stops a running belt and disarms only when requested', async () => {
