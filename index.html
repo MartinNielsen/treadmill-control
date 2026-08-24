@@ -1379,6 +1379,16 @@
       }
 
       function beginCameraTimedSession() {
+        if (resumedSession) {
+          updateCameraTimedSessionDisplay();
+          return;
+        }
+        if (cameraResumeSessionId !== null) {
+          const session = sessionHistory.find((item) => item.id === cameraResumeSessionId
+            && item.endedAt !== null && item.endedAt !== undefined);
+          pendingResumeSessionId = session ? session.id : null;
+          cameraResumeSessionId = null;
+        }
         beginOrResumeSession({ cameraControlled: true });
         updateCameraTimedSessionDisplay();
       }
@@ -1500,6 +1510,14 @@
         ui('operationalStatus').textContent = m;
       };
 
+      const lastCameraControlConsoleSignatures = new Map();
+      function cameraControlConsole(method, event, detail = {}) {
+        const serialized = JSON.stringify(detail);
+        if (lastCameraControlConsoleSignatures.get(event) === serialized) return;
+        lastCameraControlConsoleSignatures.set(event, serialized);
+        console[method](`[camera-control ${formatDebugTimestamp()}] ${event} ${serialized}`);
+      }
+
       const cameraBeltControlCheckbox = ui('cameraBeltControl');
       const cameraAutomationStatus = ui('cameraAutomationStatus');
       let cameraBeltControlPreference = loadCameraBeltControlPreference();
@@ -1561,6 +1579,7 @@
       let minKph = 0, maxKph = 20, stepKph = 0.1; // defaults until we read Supported Speed Range
       let currentSpeedKph = 0.0;
       let hasSpeedTelemetry = false;
+      let lastSpeedTelemetryAt = 0;
       let rampUpTimeout;
       let rampUpGeneration = 0;
       const TARGET_SPEED_THROTTLE_MS = 500;
@@ -1587,6 +1606,7 @@
       let activeSessionId = null;
       let resumedSession = null;
       let pendingResumeSessionId = null;
+      let cameraResumeSessionId = null;
       let sessionHistory = loadSessionHistory();
 
       // Load the legacy target speed as a fallback until a device is connected.
@@ -1703,7 +1723,7 @@
         };
       }
 
-      function updateLiveMetrics(values) {
+      function updateLiveMetrics(values, { source = 'notification' } = {}) {
         if (Object.prototype.hasOwnProperty.call(values, 'totalDistance') && values.totalDistance !== 0xFFFFFF) {
           latestTotalDistance = values.totalDistance;
         }
@@ -1715,6 +1735,15 @@
           ui('speed').textContent = values.instantaneousSpeed.toFixed(1);
           currentSpeedKph = values.instantaneousSpeed;
           hasSpeedTelemetry = true;
+          lastSpeedTelemetryAt = Date.now();
+          if (cameraBeltControlArmed) {
+            cameraControlConsole('info', 'speed telemetry', {
+              speedKph: Number(currentSpeedKph.toFixed(1)),
+              treadmillRunning,
+              targetKph: Number(targetKph.toFixed(1)),
+              source
+            });
+          }
           setMetricVisible('metricInstantaneousSpeed', true);
         }
         updateInProgressSessionMetrics();
@@ -1761,6 +1790,7 @@
         resetLiveMetrics();
         treadmillRunning = false;
         hasSpeedTelemetry = false;
+        lastSpeedTelemetryAt = 0;
         speedRangeAvailable = false;
         setSlowestActive(false);
         setControlsEnabled(false);
@@ -1862,6 +1892,7 @@
         cancelTargetSpeedThrottle();
         treadmillRunning = false;
         hasSpeedTelemetry = false;
+        lastSpeedTelemetryAt = 0;
         speedRangeAvailable = false;
         setSlowestActive(false);
         disarmCameraBeltControl();
@@ -1893,7 +1924,7 @@
       function onTreadmillData(event) {
         const dv = event.target.value; // DataView
         const values = parseTreadmillData(dv);
-        updateLiveMetrics(values);
+        updateLiveMetrics(values, { source: 'notification' });
       }
 
       function onControlPointIndication(event) {
@@ -2085,6 +2116,12 @@
         if (now - lastStartCommandAt < CAMERA_STARTUP_GRACE_MS) return;
 
         if (hasSpeedTelemetry && currentSpeedKph <= CAMERA_STOPPED_SPEED_THRESHOLD_KPH) {
+          cameraControlConsole('warn', 'speed telemetry indicates stopped belt', {
+            currentSpeedKph,
+            targetKph,
+            lastStartAgeMs: now - lastStartCommandAt,
+            speedTelemetryAgeMs: lastSpeedTelemetryAt ? now - lastSpeedTelemetryAt : null
+          });
           log('Camera detected that the belt has stopped; sending Start/Resume');
           await start({ reason });
           return;
@@ -2095,12 +2132,20 @@
 
         lastCameraSpeedEnsureAt = now;
         if (slowestActive) setSlowestActive(false);
+        cameraControlConsole('info', 'reasserting target speed', {
+          currentSpeedKph: Number(currentSpeedKph.toFixed(1)),
+          targetKph: Number(targetKph.toFixed(1)),
+          hasSpeedTelemetry
+        });
         await writeTargetSpeedCommand(Math.round(targetKph * 100));
         log(`Camera reasserted target speed at ${targetKph.toFixed(1)} km/h`);
       }
 
       async function start({ reason = 'manual' } = {}) {
         const RAMP_UP_DELAY_MS = 5000; // 5 seconds
+        const cameraControlledStart = reason === 'camera-presence';
+
+        if (!cameraControlledStart) cameraResumeSessionId = null;
 
         lastStartCommandAt = Date.now();
         const startRampGeneration = ++rampUpGeneration;
@@ -2114,7 +2159,8 @@
             treadmillRunning = true;
             updateSlowestButton();
             log('Start command confirmed');
-            beginOrResumeSession({ cameraControlled: reason === 'camera-presence' });
+            if (cameraControlledStart) beginCameraTimedSession();
+            else beginOrResumeSession();
     
             const initialSpeed = 1.0;
             const value = Math.round(initialSpeed * 100);
@@ -2187,7 +2233,8 @@
         }
         const cameraControlledStop = reason === 'camera-presence' || reason === 'camera-signal-lost';
         log(cameraControlledStop ? 'Camera confirmed the belt is stopped' : 'Stop command confirmed');
-        const stoppedSession = cameraControlledStop ? (pauseCameraTimedSession(), null) : completeSession();
+        const stoppedSession = completeSession();
+        if (cameraControlledStop && stoppedSession) cameraResumeSessionId = stoppedSession.id;
         if (showSessionActions && stoppedSession) openSessionActionDialog(stoppedSession);
       }
 
@@ -2212,7 +2259,8 @@
         ensureRunning: (options) => ensureCameraBeltRunning(options),
         isConnected: () => controlsAvailable,
         isRunning: () => treadmillRunning,
-        onState: updateCameraAutomationStatus
+        onState: updateCameraAutomationStatus,
+        onDebug: (detail) => cameraControlConsole('info', detail.event, detail)
       });
       cameraBeltControlCheckbox.disabled = true;
       cameraBeltControlCheckbox.checked = cameraBeltControlPreference;
@@ -2276,7 +2324,7 @@
           if (state === 'empty') completeCameraTimedSession();
           return;
         }
-        if (state === 'occupied' && treadmillRunning && !getInProgressSession()) beginCameraTimedSession();
+        if (state === 'occupied' && treadmillRunning && !resumedSession && !getInProgressSession()) beginCameraTimedSession();
         if (state === 'empty') {
           if (!treadmillRunning) pauseCameraTimedSession();
           cameraBeltController.handlePresence('empty').catch((error) => {
@@ -2287,7 +2335,7 @@
       });
       window.addEventListener('camera-presence-positive', () => {
         if (!cameraBeltControlArmed) return;
-        if (treadmillRunning && !getInProgressSession()) beginCameraTimedSession();
+        if (treadmillRunning && !resumedSession && !getInProgressSession()) beginCameraTimedSession();
         cameraBeltController.handlePresence('occupied').catch((error) => {
           log(`Camera belt control failed: ${error.message}`, 'error');
           disarmCameraBeltControl();

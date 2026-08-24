@@ -1,5 +1,5 @@
 export const DEFAULT_CAMERA_URL = 'http://teslamate2host:1984/api/stream.mjpeg?src=printer_cam';
-export const CAMERA_PRESENT_CONFIRMATION_FRAMES = 2;
+export const CAMERA_PRESENT_CONFIRMATION_FRAMES = 4;
 export const CAMERA_EMPTY_CONFIRMATION_FRAMES = 6;
 
 export function formatDebugTimestamp(timestamp = Date.now()) {

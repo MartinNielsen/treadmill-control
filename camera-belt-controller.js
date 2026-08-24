@@ -1,11 +1,12 @@
 export class CameraBeltController {
-  constructor({ start, stop, ensureRunning = null, isConnected, isRunning, onState = () => {} }) {
+  constructor({ start, stop, ensureRunning = null, isConnected, isRunning, onState = () => {}, onDebug = () => {} }) {
     this.start = start;
     this.stop = stop;
     this.ensureRunning = ensureRunning;
     this.isConnected = isConnected;
     this.isRunning = isRunning;
     this.onState = onState;
+    this.onDebug = onDebug;
     this.armed = false;
     this.presence = 'unknown';
     this.state = 'disarmed';
@@ -42,8 +43,18 @@ export class CameraBeltController {
   }
 
   publish(state, detail = {}) {
+    const previousState = this.state;
     this.state = state;
     this.onState({ state, presence: this.presence, ...detail });
+    if (state !== previousState) {
+      this.onDebug({
+        event: 'state-changed',
+        from: previousState,
+        to: state,
+        presence: this.presence,
+        ...detail
+      });
+    }
   }
 
   desiredAction() {
@@ -69,6 +80,15 @@ export class CameraBeltController {
 
   enqueue(action, reason) {
     if (this.pending) return this.pending;
+    this.onDebug({
+      event: 'command-requested',
+      action,
+      reason,
+      presence: this.presence,
+      armed: this.armed,
+      connected: this.isConnected(),
+      running: this.isRunning()
+    });
     if (action === 'start') this.publish('starting', { reason });
     if (action === 'stop') this.publish('stopping', { reason });
     const operation = (action === 'start'
@@ -77,9 +97,17 @@ export class CameraBeltController {
         ? this.stop
         : this.ensureRunning)({ reason })
       .then(() => {
+        this.onDebug({
+          event: 'command-completed',
+          action,
+          reason,
+          presence: this.presence,
+          running: this.isRunning()
+        });
         this.publish(this.isRunning() ? 'running' : 'stopped', { reason });
       })
       .catch((error) => {
+        this.onDebug({ event: 'command-failed', action, reason, error: error?.message || String(error) });
         this.publish('error', { reason, error });
         throw error;
       });

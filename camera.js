@@ -11,6 +11,7 @@ import {
 
 const CONFIG_KEY = 'treadmillControl:cameraTiming';
 const FRAME_INTERVAL_MS = 500;
+const PERSON_CONFIRMATION_INTERVAL_MS = 200;
 const PREVIEW_REPLACEMENT_DELAY_MS = 300;
 const DEFAULT_PREVIEW_SIZE = { width: 640, height: 360 };
 const stabilizer = new PresenceStabilizer({
@@ -45,6 +46,15 @@ let dragStart = null;
 let mjpegImage = null;
 let mjpegUrl = '';
 let mjpegReadyPromise = null;
+const lastCameraDebugSignatures = new Map();
+
+function cameraDebug(event, detail = {}) {
+  const serialized = JSON.stringify(detail);
+  if (lastCameraDebugSignatures.get(event) === serialized) return;
+  lastCameraDebugSignatures.set(event, serialized);
+  const method = event === 'detection' || event === 'stable-state-changed' ? 'info' : 'debug';
+  console[method](`[camera ${formatDebugTimestamp()}] ${event} ${serialized}`);
+}
 
 elements.url.value = config.url;
 
@@ -173,6 +183,7 @@ function cameraReadError(error) {
 }
 
 function signalCameraLost(reason) {
+  cameraDebug('signal-lost', { reason });
   window.dispatchEvent(new CustomEvent('camera-signal-lost', { detail: { reason } }));
 }
 
@@ -294,6 +305,16 @@ function handleWorkerMessage(event) {
   drawPreview();
   const stable = stabilizer.update(message.present);
   const confidence = Math.round(message.confidence * 100);
+  const confirmingPerson = message.present && stable.state !== 'occupied';
+  const nextDelay = confirmingPerson ? PERSON_CONFIRMATION_INTERVAL_MS : FRAME_INTERVAL_MS;
+  cameraDebug('detection', {
+    present: message.present,
+    confidence,
+    stableState: stable.state,
+    stableCount: stable.count,
+    stableRequired: stable.required,
+    nextDelayMs: nextDelay
+  });
   if (stable.state === 'occupied') {
     setStatus(`Person detected (${confidence}% confidence). Presence confirmed.`, 'active');
   } else if (stable.state === 'empty') {
@@ -304,16 +325,24 @@ function handleWorkerMessage(event) {
   }
 
   if (stable.changed) {
+    cameraDebug('stable-state-changed', {
+      state: stable.state,
+      confidence,
+      present: message.present,
+      confirmationCount: stable.count,
+      confirmationRequired: stable.required
+    });
     window.dispatchEvent(new CustomEvent('camera-presence-stable', {
       detail: { state: stable.state, confidence: message.confidence }
     }));
   }
   if (message.present && stable.state === 'occupied') {
+    cameraDebug('positive-presence-confirmed', { confidence });
     window.dispatchEvent(new CustomEvent('camera-presence-positive', {
       detail: { state: stable.state, confidence: message.confidence }
     }));
   }
-  scheduleNextFrame();
+  scheduleNextFrame(nextDelay);
 }
 
 function scheduleNextFrame(delay = FRAME_INTERVAL_MS) {
