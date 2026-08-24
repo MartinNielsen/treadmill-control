@@ -1004,6 +1004,17 @@
                 <span id="operationalStatus">Ready to connect.</span>
             </section>
 
+            <section class="session-history" aria-labelledby="sessionHistoryTitle">
+                <div class="session-history-header">
+                    <h2 id="sessionHistoryTitle">Walking sessions</h2>
+                    <button id="btnClearHistory" class="secondary-button" type="button">Clear history</button>
+                </div>
+                <p class="session-history-note">Stored only in this browser on this device. An unfinished session stays here if Bluetooth disconnects.</p>
+                <div id="sessionHistoryContent">
+                    <p class="session-history-empty">No walking sessions recorded yet.</p>
+                </div>
+            </section>
+
             <section class="camera-panel" aria-labelledby="cameraTitle">
                 <div class="camera-heading">
                     <h2 id="cameraTitle">Camera timing</h2>
@@ -1035,17 +1046,6 @@
                 <p id="cameraAutomationStatus" class="camera-automation-status" role="status" aria-live="polite">Automatic belt control is disarmed.</p>
                 <p id="cameraStatus" class="camera-status" role="status" aria-live="polite">Preview the camera, select the treadmill area, then enable timing.</p>
                 <p class="camera-privacy">Person detection runs only in this browser. Automatic belt control is opt-in and requires an active Bluetooth connection.</p>
-            </section>
-
-            <section class="session-history" aria-labelledby="sessionHistoryTitle">
-                <div class="session-history-header">
-                    <h2 id="sessionHistoryTitle">Walking sessions</h2>
-                    <button id="btnClearHistory" class="secondary-button" type="button">Clear history</button>
-                </div>
-                <p class="session-history-note">Stored only in this browser on this device. An unfinished session stays here if Bluetooth disconnects.</p>
-                <div id="sessionHistoryContent">
-                    <p class="session-history-empty">No walking sessions recorded yet.</p>
-                </div>
             </section>
 
             <dialog id="clearHistoryDialog" aria-labelledby="clearHistoryDialogTitle" aria-describedby="clearHistoryDialogDescription">
