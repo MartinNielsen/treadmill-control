@@ -1,6 +1,9 @@
 export const DEFAULT_CAMERA_URL = 'http://teslamate2host:1984/api/stream.mjpeg?src=printer_cam';
+export const CAMERA_PERSON_PRESENT_THRESHOLD = 0.35;
+export const CAMERA_PERSON_HOLD_THRESHOLD = 0.2;
+export const CAMERA_DETECTOR_SCORE_THRESHOLD = 0.1;
 export const CAMERA_PRESENT_CONFIRMATION_FRAMES = 4;
-export const CAMERA_EMPTY_CONFIRMATION_FRAMES = 6;
+export const CAMERA_EMPTY_CONFIRMATION_FRAMES = 12;
 
 export function formatDebugTimestamp(timestamp = Date.now()) {
   const date = new Date(timestamp);
@@ -57,14 +60,18 @@ export class PresenceStabilizer {
     this.absentCount = 0;
   }
 
-  update(present) {
-    if (present) {
+  update(present, { supportsPresence = present } = {}) {
+    const strongPresence = Boolean(present);
+    const presenceEvidence = strongPresence || Boolean(supportsPresence);
+
+    if (strongPresence) {
       this.presentCount += 1;
-      this.absentCount = 0;
     } else {
-      this.absentCount += 1;
       this.presentCount = 0;
     }
+
+    if (presenceEvidence) this.absentCount = 0;
+    else this.absentCount += 1;
 
     const previousState = this.state;
     if (this.presentCount >= this.presentFrames) this.state = 'occupied';
@@ -73,11 +80,14 @@ export class PresenceStabilizer {
     return {
       state: this.state,
       changed: this.state !== previousState,
-      progress: present
+      progress: strongPresence
         ? Math.min(1, this.presentCount / this.presentFrames)
         : Math.min(1, this.absentCount / this.absentFrames),
-      count: present ? this.presentCount : this.absentCount,
-      required: present ? this.presentFrames : this.absentFrames
+      count: strongPresence ? this.presentCount : this.absentCount,
+      required: strongPresence ? this.presentFrames : this.absentFrames,
+      presentCount: this.presentCount,
+      absentCount: this.absentCount,
+      observation: strongPresence ? 'present' : supportsPresence ? 'weak-present' : 'absent'
     };
   }
 }

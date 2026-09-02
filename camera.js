@@ -2,6 +2,9 @@ import {
   DEFAULT_CAMERA_URL,
   formatDebugTimestamp,
   CAMERA_EMPTY_CONFIRMATION_FRAMES,
+  CAMERA_DETECTOR_SCORE_THRESHOLD,
+  CAMERA_PERSON_HOLD_THRESHOLD,
+  CAMERA_PERSON_PRESENT_THRESHOLD,
   CAMERA_PRESENT_CONFIRMATION_FRAMES,
   PresenceStabilizer,
   normalizeRegion,
@@ -13,7 +16,9 @@ const CONFIG_KEY = 'treadmillControl:cameraTiming';
 const FRAME_INTERVAL_MS = 500;
 const PERSON_CONFIRMATION_INTERVAL_MS = 200;
 const PREVIEW_REPLACEMENT_DELAY_MS = 300;
+const CAMERA_FRAME_TIMEOUT_MS = 3000;
 const DEFAULT_PREVIEW_SIZE = { width: 640, height: 360 };
+const DIAGNOSTIC_EVENT_LIMIT = 240;
 const stabilizer = new PresenceStabilizer({
   presentFrames: CAMERA_PRESENT_CONFIRMATION_FRAMES,
   absentFrames: CAMERA_EMPTY_CONFIRMATION_FRAMES
@@ -29,7 +34,13 @@ const elements = {
   previewWrap: document.getElementById('cameraPreviewWrap'),
   canvas: document.getElementById('cameraPreview'),
   status: document.getElementById('cameraStatus'),
-  badge: document.getElementById('cameraBadge')
+  badge: document.getElementById('cameraBadge'),
+  diagnosticObservation: document.getElementById('cameraDiagnosticObservation'),
+  diagnosticStable: document.getElementById('cameraDiagnosticStable'),
+  diagnosticFrame: document.getElementById('cameraDiagnosticFrame'),
+  diagnosticImage: document.getElementById('cameraDiagnosticImage'),
+  diagnosticTiming: document.getElementById('cameraDiagnosticTiming'),
+  downloadDiagnostics: document.getElementById('btnDownloadCameraDiagnostics')
 };
 
 const context = elements.canvas.getContext('2d', { alpha: false });
@@ -47,11 +58,30 @@ let mjpegImage = null;
 let mjpegUrl = '';
 let mjpegReadyPromise = null;
 const lastCameraDebugSignatures = new Map();
+const diagnosticEvents = [];
+let frameSequence = 0;
+let lastFrameFingerprint = null;
+let sameImageCount = 0;
 
-function cameraDebug(event, detail = {}) {
+function resetFrameComparison() {
+  lastFrameFingerprint = null;
+  sameImageCount = 0;
+}
+
+function recordDiagnosticEvent(event, detail = {}) {
+  diagnosticEvents.push({
+    at: new Date().toISOString(),
+    event,
+    ...detail
+  });
+  if (diagnosticEvents.length > DIAGNOSTIC_EVENT_LIMIT) diagnosticEvents.shift();
+}
+
+function cameraDebug(event, detail = {}, { dedupe = true } = {}) {
   const serialized = JSON.stringify(detail);
-  if (lastCameraDebugSignatures.get(event) === serialized) return;
-  lastCameraDebugSignatures.set(event, serialized);
+  if (dedupe && lastCameraDebugSignatures.get(event) === serialized) return;
+  if (dedupe) lastCameraDebugSignatures.set(event, serialized);
+  recordDiagnosticEvent(event, detail);
   const method = event === 'detection' || event === 'stable-state-changed' ? 'info' : 'debug';
   console[method](`[camera ${formatDebugTimestamp()}] ${event} ${serialized}`);
 }
@@ -120,6 +150,82 @@ function updateButtons() {
   elements.fullFrame.disabled = !latestFrame;
 }
 
+function setDiagnosticValue(element, value) {
+  if (element) element.textContent = value;
+}
+
+function formatConfidence(value) {
+  return `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`;
+}
+
+function resetDiagnosticSummary() {
+  setDiagnosticValue(elements.diagnosticObservation, 'Waiting for a camera result');
+  setDiagnosticValue(elements.diagnosticStable, 'Unknown');
+  setDiagnosticValue(elements.diagnosticFrame, '—');
+  setDiagnosticValue(elements.diagnosticImage, '—');
+  setDiagnosticValue(elements.diagnosticTiming, '—');
+}
+
+function updateDiagnosticSummary(message, stable, { resultReceivedAt = Date.now(), hadPreviousFingerprint = false } = {}) {
+  if (!message || !stable) return;
+
+  const confidence = formatConfidence(message.confidence);
+  const observation = message.present
+    ? `Strong person signal · ${confidence}`
+    : message.supportsPresence
+      ? `Weak person signal · ${confidence}`
+      : `No person signal · ${confidence}`;
+  const stableDetail = stable.state === 'occupied'
+    ? `Occupied · ${stable.absentCount}/${CAMERA_EMPTY_CONFIRMATION_FRAMES} hard-empty frames`
+    : stable.state === 'empty'
+      ? `Empty · ${stable.presentCount}/${CAMERA_PRESENT_CONFIRMATION_FRAMES} strong frames`
+      : `Unknown · ${stable.presentCount}/${CAMERA_PRESENT_CONFIRMATION_FRAMES} strong person, ${stable.absentCount}/${CAMERA_EMPTY_CONFIRMATION_FRAMES} empty`;
+  const imageDetail = sameImageCount > 1
+    ? `Same crop as ${sameImageCount - 1} previous capture${sameImageCount === 2 ? '' : 's'}`
+    : hadPreviousFingerprint ? 'Changed from previous capture' : 'First capture';
+  const captureAgeMs = Number.isFinite(message.capturedAt)
+    ? Math.max(0, resultReceivedAt - message.capturedAt)
+    : null;
+  const inferenceMs = Number.isFinite(message.inferenceStartedAt) && Number.isFinite(message.inferenceFinishedAt)
+    ? Math.max(0, message.inferenceFinishedAt - message.inferenceStartedAt)
+    : null;
+
+  setDiagnosticValue(elements.diagnosticObservation, observation);
+  setDiagnosticValue(elements.diagnosticStable, stableDetail);
+  setDiagnosticValue(elements.diagnosticFrame, message.frameId ? `#${message.frameId} · ${message.detected ? 'detection returned' : 'no detection'}` : 'Unnumbered result');
+  setDiagnosticValue(elements.diagnosticImage, imageDetail);
+  setDiagnosticValue(
+    elements.diagnosticTiming,
+    `fetch ${Number.isFinite(message.captureStartedAt) && Number.isFinite(message.capturedAt) ? `${Math.max(0, message.capturedAt - message.captureStartedAt)} ms` : '—'} · capture→result ${captureAgeMs === null ? '—' : `${captureAgeMs} ms`} · inference ${inferenceMs === null ? '—' : `${inferenceMs} ms`}`
+  );
+}
+
+function downloadDiagnostics() {
+  const payload = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    settings: {
+      enabled,
+      region: { ...config.region },
+      presentFrames: CAMERA_PRESENT_CONFIRMATION_FRAMES,
+      emptyFrames: CAMERA_EMPTY_CONFIRMATION_FRAMES,
+      presentThreshold: CAMERA_PERSON_PRESENT_THRESHOLD,
+      holdThreshold: CAMERA_PERSON_HOLD_THRESHOLD,
+      detectorScoreThreshold: CAMERA_DETECTOR_SCORE_THRESHOLD
+    },
+    latest: latestDetection ? { ...latestDetection } : null,
+    events: diagnosticEvents.slice()
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `treadmill-camera-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  cameraDebug('diagnostics-downloaded', { eventCount: diagnosticEvents.length });
+}
+
 function getFetchOptions(url) {
   const options = { mode: 'cors', cache: 'no-store', credentials: 'omit' };
   if ('targetAddressSpace' in Request.prototype) {
@@ -131,11 +237,17 @@ function getFetchOptions(url) {
 
 async function fetchFrameBlob() {
   const snapshotUrl = toSnapshotUrl(config.url);
-  const response = await fetch(snapshotUrl, getFetchOptions(snapshotUrl));
-  if (!response.ok) throw new Error(`Camera returned HTTP ${response.status}.`);
-  const blob = await response.blob();
-  if (!blob.type.startsWith('image/')) throw new Error(`Camera returned ${blob.type || 'an unknown format'} instead of JPEG.`);
-  return blob;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CAMERA_FRAME_TIMEOUT_MS);
+  try {
+    const response = await fetch(snapshotUrl, { ...getFetchOptions(snapshotUrl), signal: controller.signal });
+    if (!response.ok) throw new Error(`Camera returned HTTP ${response.status}.`);
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) throw new Error(`Camera returned ${blob.type || 'an unknown format'} instead of JPEG.`);
+    return blob;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function closeMjpegStream() {
@@ -176,6 +288,7 @@ async function getFrameSource() {
 
 function cameraReadError(error) {
   const message = error?.message || String(error);
+  if (error?.name === 'AbortError') return `Camera frame timed out after ${CAMERA_FRAME_TIMEOUT_MS / 1000} seconds.`;
   if (/Failed to fetch|Load failed|NetworkError|fetch/i.test(message)) {
     return 'Camera could not be read. Allow local-network access and set api.origin: "*" in go2rtc.';
   }
@@ -301,35 +414,93 @@ function handleWorkerMessage(event) {
   }
   if (message.type !== 'result') return;
 
+  const resultReceivedAt = Date.now();
   latestDetection = message;
   drawPreview();
-  const stable = stabilizer.update(message.present);
-  const confidence = Math.round(message.confidence * 100);
+  const stable = stabilizer.update(message.present, { supportsPresence: message.supportsPresence });
+  const confidence = formatConfidence(message.confidence);
+  const numericConfidence = Number(message.confidence) || 0;
+  const hadPreviousFingerprint = Boolean(lastFrameFingerprint);
+  if (message.frameFingerprint) {
+    sameImageCount = message.frameFingerprint === lastFrameFingerprint ? sameImageCount + 1 : 1;
+    lastFrameFingerprint = message.frameFingerprint;
+  } else {
+    sameImageCount = 0;
+    lastFrameFingerprint = null;
+  }
+
+  updateDiagnosticSummary(message, stable, { resultReceivedAt, hadPreviousFingerprint });
   const confirmingPerson = message.present && stable.state !== 'occupied';
   const nextDelay = confirmingPerson ? PERSON_CONFIRMATION_INTERVAL_MS : FRAME_INTERVAL_MS;
+
+  cameraDebug('detection', {
+    frameId: message.frameId ?? null,
+    present: Boolean(message.present),
+    supportsPresence: Boolean(message.supportsPresence),
+    detected: Boolean(message.detected),
+    confidence: Number(numericConfidence.toFixed(3)),
+    stableState: stable.state,
+    strongPresenceCount: stable.presentCount,
+    hardEmptyCount: stable.absentCount,
+    sameImageCount,
+    frameSize: message.frameWidth && message.frameHeight ? `${message.frameWidth}x${message.frameHeight}` : null,
+    cropSize: message.cropWidth && message.cropHeight ? `${message.cropWidth}x${message.cropHeight}` : null,
+    imageFingerprint: message.frameFingerprint ?? null,
+    captureAgeMs: Number.isFinite(message.capturedAt) ? Math.max(0, resultReceivedAt - message.capturedAt) : null,
+    inferenceMs: Number.isFinite(message.inferenceStartedAt) && Number.isFinite(message.inferenceFinishedAt)
+      ? Math.max(0, message.inferenceFinishedAt - message.inferenceStartedAt)
+      : null,
+    nextDelayMs: nextDelay
+  }, { dedupe: false });
+
   if (stable.state === 'occupied') {
-    setStatus(`Person detected (${confidence}% confidence). Presence confirmed.`, 'active');
+    if (message.present) {
+      setStatus(`Person detected (${confidence} confidence). Presence confirmed.`, 'active');
+    } else if (message.supportsPresence) {
+      setStatus(`Presence remains confirmed; weak person signal (${confidence}).`, 'active');
+    } else {
+      setStatus(`Presence remains confirmed; no person signal (${confidence}). Empty check ${stable.absentCount}/${CAMERA_EMPTY_CONFIRMATION_FRAMES}.`, 'active');
+    }
   } else if (stable.state === 'empty') {
-    setStatus('Treadmill is empty. Waiting for a person.', 'empty');
+    if (message.present) {
+      setStatus(`Treadmill is empty; confirming person (${stable.presentCount}/${CAMERA_PRESENT_CONFIRMATION_FRAMES}, ${confidence}).`, 'empty');
+    } else if (message.supportsPresence) {
+      setStatus(`Treadmill is empty; weak person signal (${confidence}), waiting for a stronger confirmation.`, 'empty');
+    } else {
+      setStatus('Treadmill is empty. Waiting for a person.', 'empty');
+    }
   } else {
-    const candidate = message.present ? 'Confirming person' : 'Confirming empty treadmill';
-    setStatus(`${candidate} (${stable.count}/${stable.required}${message.present ? `, ${confidence}% confidence` : ''})…`);
+    if (message.present) {
+      setStatus(`Confirming person (${stable.presentCount}/${CAMERA_PRESENT_CONFIRMATION_FRAMES}, ${confidence})…`);
+    } else if (message.supportsPresence) {
+      setStatus(`Weak person signal (${confidence}); waiting for strong confirmation…`);
+    } else {
+      setStatus(`Confirming empty treadmill (${stable.absentCount}/${CAMERA_EMPTY_CONFIRMATION_FRAMES})…`);
+    }
   }
 
   if (stable.changed) {
     cameraDebug('stable-state-changed', {
       state: stable.state,
-      confidence,
+      confidence: numericConfidence,
       present: message.present,
+      supportsPresence: message.supportsPresence,
+      strongPresenceCount: stable.presentCount,
+      hardEmptyCount: stable.absentCount,
       confirmationCount: stable.count,
       confirmationRequired: stable.required
     });
     window.dispatchEvent(new CustomEvent('camera-presence-stable', {
-      detail: { state: stable.state, confidence: message.confidence }
+      detail: {
+        state: stable.state,
+        confidence: message.confidence,
+        present: message.present,
+        supportsPresence: message.supportsPresence
+      }
     }));
   }
   if (message.present && stable.state === 'occupied') {
-    cameraDebug('positive-presence-confirmed', { confidence });
+    cameraDebug('positive-presence-confirmed', { confidence: numericConfidence });
     window.dispatchEvent(new CustomEvent('camera-presence-positive', {
       detail: { state: stable.state, confidence: message.confidence }
     }));
@@ -353,8 +524,13 @@ async function runDetectionCycle() {
 
   inferencePending = true;
   const generation = runGeneration;
+  const captureStartedAt = Date.now();
   try {
-    const source = await getFrameSource();
+    // Always infer on a fresh cache-busted snapshot. A persistent MJPEG image
+    // can keep returning the same decoded frame even while the stream is
+    // connected, which makes a transient miss look like real empty time.
+    const source = await fetchFrameBlob();
+    const capturedAt = Date.now();
     const [previewBitmap, inferenceBitmap] = await Promise.all([
       createImageBitmap(source),
       createImageBitmap(source)
@@ -372,10 +548,21 @@ async function runDetectionCycle() {
     elements.previewWrap.hidden = false;
     drawPreview();
     updateButtons();
-    worker.postMessage({ type: 'detect', bitmap: inferenceBitmap, region: config.region }, [inferenceBitmap]);
+    worker.postMessage({
+      type: 'detect',
+      bitmap: inferenceBitmap,
+      region: config.region,
+      frameId: ++frameSequence,
+      captureStartedAt,
+      capturedAt
+    }, [inferenceBitmap]);
   } catch (error) {
     closeMjpegStream();
     inferencePending = false;
+    cameraDebug('capture-failed', {
+      captureAgeMs: Math.max(0, Date.now() - captureStartedAt),
+      reason: cameraReadError(error)
+    });
     signalCameraLost(cameraReadError(error));
     setStatus(cameraReadError(error), 'error');
     scheduleNextFrame(5000);
@@ -394,8 +581,24 @@ function enableCameraTiming() {
   config.enabled = true;
   stabilizer.reset();
   latestDetection = null;
+  diagnosticEvents.length = 0;
+  lastCameraDebugSignatures.clear();
+  frameSequence = 0;
+  resetFrameComparison();
+  resetDiagnosticSummary();
+  closeMjpegStream();
   saveConfig();
   updateButtons();
+  cameraDebug('camera-enabled', {
+    frameIntervalMs: FRAME_INTERVAL_MS,
+    frameTimeoutMs: CAMERA_FRAME_TIMEOUT_MS,
+    presentConfirmationFrames: CAMERA_PRESENT_CONFIRMATION_FRAMES,
+    emptyConfirmationFrames: CAMERA_EMPTY_CONFIRMATION_FRAMES,
+    presentThreshold: CAMERA_PERSON_PRESENT_THRESHOLD,
+    holdThreshold: CAMERA_PERSON_HOLD_THRESHOLD,
+    detectorScoreThreshold: CAMERA_DETECTOR_SCORE_THRESHOLD,
+    detectionSource: 'fresh-snapshot'
+  });
   setStatus('Loading the person detector…');
   initializeWorker();
   if (workerReady) runDetectionCycle();
@@ -403,6 +606,7 @@ function enableCameraTiming() {
 
 function disableCameraTiming() {
   if (enabled) signalCameraLost('camera timing disabled');
+  cameraDebug('camera-disabled');
   enabled = false;
   runGeneration += 1;
   config.enabled = false;
@@ -410,6 +614,8 @@ function disableCameraTiming() {
   clearTimeout(frameTimer);
   stabilizer.reset();
   latestDetection = null;
+  resetFrameComparison();
+  resetDiagnosticSummary();
   if (worker) worker.terminate();
   worker = null;
   workerReady = false;
@@ -451,6 +657,7 @@ elements.canvas.addEventListener('pointerup', () => {
   if (!dragStart) return;
   dragStart = null;
   stabilizer.reset();
+  resetFrameComparison();
   saveConfig();
   setStatus(enabled ? 'Treadmill area updated. Rechecking…' : 'Treadmill area saved.', 'ready');
 });
@@ -465,6 +672,7 @@ elements.fullFrame.addEventListener('click', () => {
   config.region = normalizeRegion(null);
   latestDetection = null;
   stabilizer.reset();
+  resetFrameComparison();
   saveConfig();
   drawPreview();
   setStatus(enabled ? 'Using the full frame. Rechecking…' : 'Full frame selected.', 'ready');
@@ -484,6 +692,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 updateButtons();
+elements.downloadDiagnostics?.addEventListener('click', downloadDiagnostics);
+resetDiagnosticSummary();
 setPreviewSize(config.previewSize.width, config.previewSize.height);
 elements.previewWrap.hidden = false;
 if (config.enabled) enableCameraTiming();

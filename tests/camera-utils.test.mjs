@@ -90,3 +90,21 @@ test('requires the longer empty confirmation window used by camera control', () 
   assert.equal(empty.state, 'empty');
   assert.equal(empty.changed, true);
 });
+
+test('weak person evidence holds an occupied state without confirming a new one', () => {
+  const state = new PresenceStabilizer({ presentFrames: 2, absentFrames: 3 });
+
+  state.update(true);
+  const occupied = state.update(true);
+  assert.equal(occupied.state, 'occupied');
+
+  for (let index = 0; index < 4; index += 1) {
+    const weak = state.update(false, { supportsPresence: true });
+    assert.equal(weak.state, 'occupied');
+    assert.equal(weak.absentCount, 0);
+  }
+
+  assert.equal(state.update(false).state, 'occupied');
+  assert.equal(state.update(false).state, 'occupied');
+  assert.equal(state.update(false).state, 'empty');
+});
