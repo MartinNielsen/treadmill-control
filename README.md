@@ -4,7 +4,7 @@ Send Bluetooth commands to an FTMS treadmill from a web page.
 
 ## Camera-assisted timing
 
-The optional camera monitor runs entirely in the browser. It reads fresh, cache-busted JPEG snapshots from a go2rtc stream and detects the `person` class with a self-hosted MediaPipe EfficientDet-Lite0 model. Timing works without belt control; an explicit automatic-control arm can also true-stop the belt when the treadmill is empty and start/resume it when a person returns. Person detection requires four consecutive strong positive frames; while confirming a person, frames are sampled about every 200 ms, then the normal 500 ms cadence resumes after occupancy is confirmed. Once occupied, weak person detections preserve presence but cannot start the belt, and empty detection requires twelve consecutive hard-empty frames (about six seconds at the default interval). Each positive stable frame reconciles the belt and reasserts the target speed if telemetry shows it slowing down. Camera-controlled stops finalize the current walking session, and the next camera-controlled start resumes that same session using the normal distance/time accumulation flow.
+The optional camera monitor runs entirely in the browser. It reads fresh, cache-busted JPEG snapshots from a go2rtc stream and detects the `person` class with a self-hosted MediaPipe EfficientDet-Lite0 model. Timing works without belt control; an explicit automatic-control arm can also true-stop the belt when the treadmill is empty and start/resume it when a person returns. Person detection requires two consecutive strong positive frames; while confirming a person, frames are sampled about every 200 ms, then the normal 500 ms cadence resumes after occupancy is confirmed. Once occupied, weak person detections preserve presence but cannot start the belt, and empty detection requires twelve consecutive hard-empty frames. Each positive stable frame reconciles the belt and reasserts the target speed if telemetry shows it slowing down. Camera-controlled stops finalize the current walking session, and the next camera-controlled start resumes that same session using the normal distance/time accumulation flow.
 
 For a go2rtc stream such as:
 
@@ -35,7 +35,7 @@ The browser console records timestamped detector results, including confidence, 
 1. Deploy the new version, connect the treadmill, preview the camera, select the treadmill area, and enable timing.
 2. Open Detection diagnostics before starting a normal walk. Leave the page visible while automatic belt control is armed.
 3. Walk for at least ten minutes. If the belt pauses while you are still there, download diagnostics immediately and note the last frame number, current signal, stable state, image comparison, and timing.
-4. Step completely off the treadmill and verify that it stops after roughly six seconds. Return to the treadmill and verify that four strong person frames start/resume it.
+4. Step completely off the treadmill and verify that it stops only after the hard-empty confirmation window. Return to the treadmill and verify that two strong person frames start/resume it.
 
 The diagnostic file does not contain camera images or credentials. It is intended to be shared when a false pause needs analysis.
 

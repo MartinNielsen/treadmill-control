@@ -372,6 +372,9 @@ async function testCamera() {
     const source = await getFrameSource();
     await showFrame(source);
     setStatus('Camera ready. Drag over the image to select the treadmill area.', 'ready');
+    // Warm up MediaPipe while the user chooses the region so model loading is
+    // not added to the step-on response time.
+    initializeWorker();
   } catch (error) {
     setStatus(cameraReadError(error), 'error');
   } finally {
@@ -401,6 +404,8 @@ function handleWorkerMessage(event) {
   const message = event.data;
   if (message.type === 'ready') {
     workerReady = true;
+    cameraDebug('detector-ready', { preloaded: !enabled });
+    if (!enabled) return;
     setStatus('Person detector ready. Checking the treadmill…');
     runDetectionCycle();
     return;
@@ -446,6 +451,9 @@ function handleWorkerMessage(event) {
     frameSize: message.frameWidth && message.frameHeight ? `${message.frameWidth}x${message.frameHeight}` : null,
     cropSize: message.cropWidth && message.cropHeight ? `${message.cropWidth}x${message.cropHeight}` : null,
     imageFingerprint: message.frameFingerprint ?? null,
+    captureDurationMs: Number.isFinite(message.captureStartedAt) && Number.isFinite(message.capturedAt)
+      ? Math.max(0, message.capturedAt - message.captureStartedAt)
+      : null,
     captureAgeMs: Number.isFinite(message.capturedAt) ? Math.max(0, resultReceivedAt - message.capturedAt) : null,
     inferenceMs: Number.isFinite(message.inferenceStartedAt) && Number.isFinite(message.inferenceFinishedAt)
       ? Math.max(0, message.inferenceFinishedAt - message.inferenceStartedAt)

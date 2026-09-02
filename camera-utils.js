@@ -2,7 +2,7 @@ export const DEFAULT_CAMERA_URL = 'http://teslamate2host:1984/api/stream.mjpeg?s
 export const CAMERA_PERSON_PRESENT_THRESHOLD = 0.35;
 export const CAMERA_PERSON_HOLD_THRESHOLD = 0.2;
 export const CAMERA_DETECTOR_SCORE_THRESHOLD = 0.1;
-export const CAMERA_PRESENT_CONFIRMATION_FRAMES = 4;
+export const CAMERA_PRESENT_CONFIRMATION_FRAMES = 2;
 export const CAMERA_EMPTY_CONFIRMATION_FRAMES = 12;
 
 export function formatDebugTimestamp(timestamp = Date.now()) {
