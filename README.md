@@ -42,5 +42,5 @@ The diagnostic file does not contain camera images or credentials. It is intende
 ## Tests
 
 ```bash
-node --test tests/camera-utils.test.mjs tests/camera-belt-controller.test.mjs
+node --test tests/*.test.mjs
 ```

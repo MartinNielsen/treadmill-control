@@ -680,6 +680,30 @@
             padding: 0.5rem 0.25rem;
             font-size: 0.85rem;
         }
+        .incline-section .target-value { margin-bottom: 6px; }
+        .incline-current {
+            margin: 0 0 12px;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+        .incline-presets {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .incline-presets button {
+            padding: 0.45rem 0.2rem;
+            font-size: 0.8rem;
+        }
+        .incline-presets button[aria-pressed="true"] {
+            background: var(--amber);
+            border-color: var(--amber);
+            color: #211505;
+        }
+        .speed-controls.incline-steps {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
         .control-dock {
             display: grid;
             grid-template-columns: 1.15fr 1.15fr 1fr;
@@ -1013,6 +1037,10 @@
                             <h3>Elapsed time</h3>
                             <p class="metric-value"><span id="metricElapsedTimeValue">—</span> <span class="metric-unit">min:s</span></p>
                         </article>
+                        <article class="metric-card" id="metricElevationGain" hidden>
+                            <h3>Elevation gain</h3>
+                            <p class="metric-value"><span id="metricElevationGainValue">0</span> <span class="metric-unit">m</span></p>
+                        </article>
                     </div>
                 </section>
             </section>
@@ -1029,6 +1057,20 @@
                     <button id="btnPlusSmall" type="button" aria-label="Increase target speed by 0.1 km/h">+0.1</button>
                     <button id="btnPlus" type="button" aria-label="Increase target speed by 0.5 km/h">+0.5</button>
                 </div>
+            </section>
+
+            <section id="inclineSection" class="target-section incline-section" aria-labelledby="targetInclineTitle" hidden>
+                <div class="target-heading">
+                    <h2 id="targetInclineTitle">Incline</h2>
+                    <div class="target-range">Range <span id="inclineRange">—</span><br>Step <span id="inclineStep">—</span></div>
+                </div>
+                <div class="target-value"><span id="inclineTarget">0</span> <span class="stat-unit">%</span></div>
+                <p class="incline-current">Current <span id="inclineCurrent">—</span> %</p>
+                <div class="speed-controls incline-steps" aria-label="Incline adjustments">
+                    <button id="btnInclineMinus" type="button" aria-label="Decrease incline by one step">−</button>
+                    <button id="btnInclinePlus" type="button" aria-label="Increase incline by one step">+</button>
+                </div>
+                <div id="inclinePresets" class="incline-presets" aria-label="Incline presets"></div>
             </section>
 
             <section class="control-dock" aria-label="Treadmill controls">
@@ -1147,6 +1189,7 @@
     (async () => {
       const { CameraBeltController } = await import('./camera-belt-controller.js');
       const { formatDebugTimestamp } = await import('./camera-utils.js');
+      const inclineUtils = await import('./incline-utils.js');
       // ======= Assigned Numbers (16-bit UUIDs) =======
       const FTMS_SERVICE                = 0x1826; // Fitness Machine Service
       const SESSION_HISTORY_KEY         = 'treadmillSessionHistory';
@@ -1156,10 +1199,13 @@
       const CH_TREADMILL_DATA           = 0x2ACD; // notifications with speed, etc.
       const CH_SUPPORTED_SPEED_RANGE    = 0x2AD4; // min, max, increment (0.01 km/h)
       const CH_FITNESS_MACHINE_CONTROL  = 0x2AD9; // write + indicate responses
+      const CH_FITNESS_MACHINE_FEATURE  = 0x2ACC; // machine + target setting features
+      const CH_SUPPORTED_INCLINE_RANGE  = 0x2AD5; // sint16 min, max, uint16 step (0.1 %)
 
       // Fitness Machine Control Point opcodes (per spec)
       const OP_REQUEST_CONTROL = 0x00;
       const OP_SET_TARGET_SPEED= 0x02; // parameter: uint16 of 0.01 km/h
+      const OP_SET_TARGET_INCLINE = 0x03; // parameter: sint16 of 0.1 %
       const OP_START_OR_RESUME = 0x07;
       const OP_STOP_OR_PAUSE   = 0x08;
       const OP_RESPONSE_CODE   = 0x80;
@@ -1337,8 +1383,11 @@
             : formatDistance(session.latestDistance);
           const extraDuration = isResumed ? `<span class="session-extra">+ ${formatDuration(resumedSession.extraDurationSeconds)}</span>` : '';
           const extraDistance = isResumed ? `<span class="session-extra">+ ${formatDistance(resumedSession.extraDistanceMeters)}</span>` : '';
+          const gain = inclineUtils.sessionElevationGain(session);
+          const elevation = session.hadIncline || gain > 0
+            ? `<span class="session-extra">↑ ${formatElevation(gain)} m climbed</span>` : '';
           const actionLabel = isResumed ? 'Open actions for active resumed session' : 'Open session actions';
-          return `<tr><td>${formatSessionStartedCell(session)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}</td><td><div class="session-actions"><button class="session-action-button" type="button" data-session-id="${escapeHtml(session.id)}" aria-label="${actionLabel}">⋯</button></div></td></tr>`;
+          return `<tr><td>${formatSessionStartedCell(session)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}${elevation}</td><td><div class="session-actions"><button class="session-action-button" type="button" data-session-id="${escapeHtml(session.id)}" aria-label="${actionLabel}">⋯</button></div></td></tr>`;
         }).join('');
 
         content.innerHTML = `<div class="session-history-table-wrap">
@@ -1665,6 +1714,11 @@
       let pendingResumeSessionId = null;
       let cameraResumeSessionId = null;
       let sessionHistory = loadSessionHistory();
+      let inclineRange = null; // { min, max, step } when the treadmill supports target incline
+      let targetInclinePercent = 0;
+      let inclineCommandGeneration = 0;
+      let latestInclinePercent = 0;
+      let lastElevationDistance = null;
 
       // Load the legacy target speed as a fallback until a device is connected.
       const savedTargetSpeed = loadStoredTargetSpeed(LEGACY_TARGET_SPEED_KEY);
@@ -1837,6 +1891,7 @@
         ui('speed').textContent = '0.0';
         ui('metricTotalDistanceValue').textContent = '—';
         ui('metricElapsedTimeValue').textContent = '—';
+        setMetricVisible('metricElevationGain', false);
         setMetricVisible('metricInstantaneousSpeed', false);
         setMetricVisible('metricTotalDistance', false);
         setMetricVisible('metricElapsedTime', false);
@@ -1845,6 +1900,8 @@
 
       async function connect() {
         resetLiveMetrics();
+        latestInclinePercent = 0;
+        lastElevationDistance = null;
         treadmillRunning = false;
         hasSpeedTelemetry = false;
         lastSpeedTelemetryAt = 0;
@@ -1918,10 +1975,137 @@
           ui('step').textContent  = '—';
         }
 
+        await detectInclineSupport();
         await restoreStoredTargetSpeed();
         setControlsEnabled(true);
         resumeStoredSession();
         log('Connected successfully');
+      }
+
+      async function detectInclineSupport() {
+        inclineRange = null;
+        let feature = null;
+        try {
+          const chFeature = await ftms.getCharacteristic(CH_FITNESS_MACHINE_FEATURE);
+          feature = inclineUtils.parseFitnessMachineFeature(await chFeature.readValue());
+        } catch (e) {
+          console.warn('Fitness Machine Feature characteristic unavailable:', e);
+        }
+        let range = null;
+        try {
+          const chRange = await ftms.getCharacteristic(CH_SUPPORTED_INCLINE_RANGE);
+          range = inclineUtils.parseInclinationRange(await chRange.readValue());
+        } catch (e) {
+          console.info('Supported Inclination Range characteristic not found.');
+        }
+        const supported = feature ? feature.targetInclinationSupported : range !== null;
+        if (supported && range) inclineRange = range;
+        else if (supported) inclineRange = { min: 0, max: 15, step: 0.5 };
+        if (inclineRange) {
+          targetInclinePercent = inclineUtils.clampIncline(0, inclineRange);
+          log(`Incline supported: ${inclineRange.min}–${inclineRange.max} %, step ${inclineRange.step} %`);
+        }
+        renderInclineControls();
+      }
+
+      function formatIncline(value) {
+        return Number.isInteger(value) ? String(value) : value.toFixed(1);
+      }
+
+      function renderInclineControls() {
+        const section = ui('inclineSection');
+        section.hidden = !inclineRange;
+        if (!inclineRange) return;
+        ui('inclineRange').textContent = `${formatIncline(inclineRange.min)}–${formatIncline(inclineRange.max)} %`;
+        ui('inclineStep').textContent = `${formatIncline(inclineRange.step)} %`;
+        const presets = ui('inclinePresets');
+        if (presets.dataset.rangeKey !== JSON.stringify(inclineRange)) {
+          presets.dataset.rangeKey = JSON.stringify(inclineRange);
+          presets.replaceChildren(...inclineUtils.presetsWithinRange(inclineRange).map((value) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.dataset.incline = String(value);
+            button.textContent = `${formatIncline(value)} %`;
+            button.addEventListener('click', () => setTargetIncline(value));
+            return button;
+          }));
+        }
+        updateInclineDisplay();
+      }
+
+      function updateInclineDisplay() {
+        if (!inclineRange) return;
+        ui('inclineTarget').textContent = formatIncline(targetInclinePercent);
+        const enabled = controlsAvailable;
+        ui('btnInclineMinus').disabled = !enabled || targetInclinePercent <= inclineRange.min;
+        ui('btnInclinePlus').disabled = !enabled || targetInclinePercent >= inclineRange.max;
+        for (const button of ui('inclinePresets').children) {
+          button.disabled = !enabled;
+          button.setAttribute('aria-pressed', String(Number(button.dataset.incline) === targetInclinePercent));
+        }
+      }
+
+      async function setTargetIncline(percent) {
+        if (!inclineRange || !controlsAvailable) return;
+        const requested = inclineUtils.clampIncline(percent, inclineRange);
+        targetInclinePercent = requested;
+        updateInclineDisplay();
+        const generation = ++inclineCommandGeneration;
+        try {
+          // Skip stale requests queued behind newer taps.
+          const result = await writeControl(OP_SET_TARGET_INCLINE, inclineUtils.encodeInclineParameter(requested),
+            () => generation === inclineCommandGeneration);
+          if (!result.cancelled) log(`Target incline confirmed at ${formatIncline(requested)} %`);
+        } catch (e) {
+          // An incline rejection must not drop the connection or speed controls.
+          console.warn('Incline command failed:', e);
+          log(`Incline command failed: ${e.message}`, 'warn');
+        }
+      }
+
+      function adjustIncline(direction) {
+        if (!inclineRange) return;
+        setTargetIncline(targetInclinePercent + direction * inclineRange.step);
+      }
+
+      function getElevationSession() {
+        if (resumedSession) return getResumedSession();
+        return getInProgressSession();
+      }
+
+      function accumulateElevationGain(values) {
+        const distance = Object.prototype.hasOwnProperty.call(values, 'totalDistance') && isValidDistance(values.totalDistance)
+          ? values.totalDistance : null;
+        if (distance === null) return;
+        const previous = lastElevationDistance;
+        lastElevationDistance = distance;
+        const session = getElevationSession();
+        if (!session) return;
+        if (latestInclinePercent > 0 && !session.hadIncline) {
+          session.hadIncline = true;
+          saveSessionHistory();
+        }
+        const increment = inclineUtils.elevationGainIncrement(previous, distance, latestInclinePercent);
+        if (increment > 0) {
+          session.elevationGainMeters = inclineUtils.sessionElevationGain(session) + increment;
+          saveSessionHistory();
+          renderSessionHistory();
+        }
+        updateElevationDisplay();
+      }
+
+      function formatElevation(meters) {
+        return meters < 10 ? meters.toFixed(1) : Math.round(meters).toString();
+      }
+
+      function updateElevationDisplay() {
+        const session = getElevationSession();
+        const show = !!session && (session.hadIncline || inclineUtils.sessionElevationGain(session) > 0);
+        setMetricVisible('metricElevationGain', show);
+        if (show) {
+          ui('liveMetrics').hidden = false;
+          ui('metricElevationGainValue').textContent = formatElevation(inclineUtils.sessionElevationGain(session));
+        }
       }
 
       function disconnect() {
@@ -1953,6 +2137,7 @@
         speedRangeAvailable = false;
         setSlowestActive(false);
         disarmCameraBeltControl();
+        inclineCommandGeneration += 1;
         log('Disconnected');
         setControlsEnabled(false);
       }
@@ -1966,6 +2151,7 @@
         ui('btnDisconnect').hidden = !enabled;
         cameraBeltControlCheckbox.disabled = !enabled;
         updateSlowestButton();
+        updateInclineDisplay();
         updateSessionActionAvailability();
         if (cameraBeltController) {
           cameraBeltController.setConnected(enabled)
@@ -1981,7 +2167,16 @@
       function onTreadmillData(event) {
         const dv = event.target.value; // DataView
         const values = parseTreadmillData(dv);
+        // Incline must be known before distance deltas are converted to climb.
+        const frameIncline = inclineUtils.readTreadmillIncline(dv);
+        if (frameIncline !== null) latestInclinePercent = frameIncline;
         updateLiveMetrics(values, { source: 'notification' });
+        const incline = inclineUtils.readTreadmillIncline(dv);
+        if (incline !== null) {
+          latestInclinePercent = incline;
+          if (inclineRange) ui('inclineCurrent').textContent = formatIncline(incline);
+        }
+        accumulateElevationGain(values);
       }
 
       function onControlPointIndication(event) {
@@ -2373,6 +2568,8 @@
       ui('btnMinusSmall').addEventListener('click', () => {
         adjustTargetSpeed(-0.1);
       });
+      ui('btnInclineMinus').addEventListener('click', () => adjustIncline(-1));
+      ui('btnInclinePlus').addEventListener('click', () => adjustIncline(+1));
       window.addEventListener('camera-presence-stable', (event) => {
         const state = event.detail?.state;
         if (state !== 'occupied' && state !== 'empty') return;
