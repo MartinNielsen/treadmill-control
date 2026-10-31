@@ -49,3 +49,25 @@ test('reads incline from the X14 treadmill data frame', () => {
 test('presets are clamped and de-duplicated', () => {
   assert.deepEqual(presetsWithinRange({ min: 0, max: 5, step: 1 }), [0, 2, 4, 5]);
 });
+
+import { elevationGainIncrement, sessionElevationGain } from '../incline-utils.js';
+
+test('elevation gain accumulates distance deltas times positive incline', () => {
+  let gain = 0, prev = 1000;
+  for (const [d, inc] of [[1010, 5], [1020, 5], [1030, 0], [1040, -3], [1050, 10]]) {
+    gain += elevationGainIncrement(prev, d, inc); prev = d;
+  }
+  assert.equal(Math.round(gain * 100) / 100, 2);
+});
+
+test('elevation gain ignores resets, jumps and missing values', () => {
+  assert.equal(elevationGainIncrement(500, 0, 5), 0);
+  assert.equal(elevationGainIncrement(0, 5000, 5), 0);
+  assert.equal(elevationGainIncrement(null, 10, 5), 0);
+  assert.equal(elevationGainIncrement(10, 20, null), 0);
+});
+
+test('old sessions without the field count as 0', () => {
+  assert.equal(sessionElevationGain({}), 0);
+  assert.equal(sessionElevationGain({ elevationGainMeters: 3.4 }), 3.4);
+});

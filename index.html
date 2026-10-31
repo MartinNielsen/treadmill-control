@@ -1037,6 +1037,10 @@
                             <h3>Elapsed time</h3>
                             <p class="metric-value"><span id="metricElapsedTimeValue">—</span> <span class="metric-unit">min:s</span></p>
                         </article>
+                        <article class="metric-card" id="metricElevationGain" hidden>
+                            <h3>Elevation gain</h3>
+                            <p class="metric-value"><span id="metricElevationGainValue">0</span> <span class="metric-unit">m</span></p>
+                        </article>
                     </div>
                 </section>
             </section>
@@ -1379,8 +1383,11 @@
             : formatDistance(session.latestDistance);
           const extraDuration = isResumed ? `<span class="session-extra">+ ${formatDuration(resumedSession.extraDurationSeconds)}</span>` : '';
           const extraDistance = isResumed ? `<span class="session-extra">+ ${formatDistance(resumedSession.extraDistanceMeters)}</span>` : '';
+          const gain = inclineUtils.sessionElevationGain(session);
+          const elevation = session.hadIncline || gain > 0
+            ? `<span class="session-extra">↑ ${formatElevation(gain)} m climbed</span>` : '';
           const actionLabel = isResumed ? 'Open actions for active resumed session' : 'Open session actions';
-          return `<tr><td>${formatSessionStartedCell(session)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}</td><td><div class="session-actions"><button class="session-action-button" type="button" data-session-id="${escapeHtml(session.id)}" aria-label="${actionLabel}">⋯</button></div></td></tr>`;
+          return `<tr><td>${formatSessionStartedCell(session)}</td><td>${duration}${extraDuration}</td><td>${distance}${extraDistance}${elevation}</td><td><div class="session-actions"><button class="session-action-button" type="button" data-session-id="${escapeHtml(session.id)}" aria-label="${actionLabel}">⋯</button></div></td></tr>`;
         }).join('');
 
         content.innerHTML = `<div class="session-history-table-wrap">
@@ -1710,6 +1717,8 @@
       let inclineRange = null; // { min, max, step } when the treadmill supports target incline
       let targetInclinePercent = 0;
       let inclineCommandGeneration = 0;
+      let latestInclinePercent = 0;
+      let lastElevationDistance = null;
 
       // Load the legacy target speed as a fallback until a device is connected.
       const savedTargetSpeed = loadStoredTargetSpeed(LEGACY_TARGET_SPEED_KEY);
@@ -1882,6 +1891,7 @@
         ui('speed').textContent = '0.0';
         ui('metricTotalDistanceValue').textContent = '—';
         ui('metricElapsedTimeValue').textContent = '—';
+        setMetricVisible('metricElevationGain', false);
         setMetricVisible('metricInstantaneousSpeed', false);
         setMetricVisible('metricTotalDistance', false);
         setMetricVisible('metricElapsedTime', false);
@@ -1890,6 +1900,8 @@
 
       async function connect() {
         resetLiveMetrics();
+        latestInclinePercent = 0;
+        lastElevationDistance = null;
         treadmillRunning = false;
         hasSpeedTelemetry = false;
         lastSpeedTelemetryAt = 0;
@@ -2056,6 +2068,46 @@
         setTargetIncline(targetInclinePercent + direction * inclineRange.step);
       }
 
+      function getElevationSession() {
+        if (resumedSession) return getResumedSession();
+        return getInProgressSession();
+      }
+
+      function accumulateElevationGain(values) {
+        const distance = Object.prototype.hasOwnProperty.call(values, 'totalDistance') && isValidDistance(values.totalDistance)
+          ? values.totalDistance : null;
+        if (distance === null) return;
+        const previous = lastElevationDistance;
+        lastElevationDistance = distance;
+        const session = getElevationSession();
+        if (!session) return;
+        if (latestInclinePercent > 0 && !session.hadIncline) {
+          session.hadIncline = true;
+          saveSessionHistory();
+        }
+        const increment = inclineUtils.elevationGainIncrement(previous, distance, latestInclinePercent);
+        if (increment > 0) {
+          session.elevationGainMeters = inclineUtils.sessionElevationGain(session) + increment;
+          saveSessionHistory();
+          renderSessionHistory();
+        }
+        updateElevationDisplay();
+      }
+
+      function formatElevation(meters) {
+        return meters < 10 ? meters.toFixed(1) : Math.round(meters).toString();
+      }
+
+      function updateElevationDisplay() {
+        const session = getElevationSession();
+        const show = !!session && (session.hadIncline || inclineUtils.sessionElevationGain(session) > 0);
+        setMetricVisible('metricElevationGain', show);
+        if (show) {
+          ui('liveMetrics').hidden = false;
+          ui('metricElevationGainValue').textContent = formatElevation(inclineUtils.sessionElevationGain(session));
+        }
+      }
+
       function disconnect() {
         if (device && device.gatt.connected) {
           log('Disconnecting...');
@@ -2115,11 +2167,16 @@
       function onTreadmillData(event) {
         const dv = event.target.value; // DataView
         const values = parseTreadmillData(dv);
+        // Incline must be known before distance deltas are converted to climb.
+        const frameIncline = inclineUtils.readTreadmillIncline(dv);
+        if (frameIncline !== null) latestInclinePercent = frameIncline;
         updateLiveMetrics(values, { source: 'notification' });
-        if (inclineRange) {
-          const incline = inclineUtils.readTreadmillIncline(dv);
-          if (incline !== null) ui('inclineCurrent').textContent = formatIncline(incline);
+        const incline = inclineUtils.readTreadmillIncline(dv);
+        if (incline !== null) {
+          latestInclinePercent = incline;
+          if (inclineRange) ui('inclineCurrent').textContent = formatIncline(incline);
         }
+        accumulateElevationGain(values);
       }
 
       function onControlPointIndication(event) {

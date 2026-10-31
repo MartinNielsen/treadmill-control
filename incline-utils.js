@@ -64,3 +64,19 @@ export function presetsWithinRange(range, presets = INCLINE_PRESETS_PERCENT) {
   const values = presets.map((p) => clampIncline(p, range));
   return [...new Set(values)];
 }
+
+// Elevation gain (m) for one distance step: only positive incline climbs.
+// Ignores missing/negative/implausible distance jumps (e.g. counter resets).
+export const MAX_DISTANCE_STEP_METERS = 100;
+export function elevationGainIncrement(previousDistance, distance, inclinePercent) {
+  if (!Number.isFinite(previousDistance) || !Number.isFinite(distance)) return 0;
+  const delta = distance - previousDistance;
+  if (!(delta > 0) || delta > MAX_DISTANCE_STEP_METERS) return 0;
+  if (!Number.isFinite(inclinePercent) || inclinePercent <= 0) return 0;
+  return delta * inclinePercent / 100;
+}
+
+export function sessionElevationGain(session) {
+  const value = session?.elevationGainMeters;
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
