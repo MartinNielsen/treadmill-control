@@ -1718,6 +1718,7 @@
       let targetInclinePercent = 0;
       let inclineCommandGeneration = 0;
       let latestInclinePercent = 0;
+      let inclineRestorePending = false; // don't let telemetry overwrite the stored incline before restore
       let lastElevationDistance = null;
 
       // Load the legacy target speed as a fallback until a device is connected.
@@ -2055,12 +2056,31 @@
           // Skip stale requests queued behind newer taps.
           const result = await writeControl(OP_SET_TARGET_INCLINE, inclineUtils.encodeInclineParameter(requested),
             () => generation === inclineCommandGeneration);
-          if (!result.cancelled) log(`Target incline confirmed at ${formatIncline(requested)} %`);
+          if (!result.cancelled) {
+            log(`Target incline confirmed at ${formatIncline(requested)} %`);
+            rememberSessionIncline(requested);
+          }
         } catch (e) {
           // An incline rejection must not drop the connection or speed controls.
           console.warn('Incline command failed:', e);
           log(`Incline command failed: ${e.message}`, 'warn');
         }
+      }
+
+      function rememberSessionIncline(percent) {
+        if (!inclineRange || !treadmillRunning || !Number.isFinite(percent)) return;
+        const session = getElevationSession();
+        if (!session || session.lastInclinePercent === percent) return;
+        session.lastInclinePercent = percent;
+        saveSessionHistory();
+      }
+
+      async function restoreSessionIncline(session) {
+        inclineRestorePending = false;
+        const target = inclineUtils.resumeInclineTarget(session, inclineRange);
+        if (target === null || !treadmillRunning || !controlsAvailable) return;
+        log(`Restoring session incline ${formatIncline(target)} %`);
+        await setTargetIncline(target);
       }
 
       function adjustIncline(direction) {
@@ -2175,6 +2195,7 @@
         if (incline !== null) {
           latestInclinePercent = incline;
           if (inclineRange) ui('inclineCurrent').textContent = formatIncline(incline);
+          if (!inclineRestorePending) rememberSessionIncline(incline);
         }
         accumulateElevationGain(values);
       }
@@ -2411,8 +2432,12 @@
             treadmillRunning = true;
             updateSlowestButton();
             log('Start command confirmed');
+            const continuingSession = !cameraControlledStart
+              && (pendingResumeSessionId !== null || !!getInProgressSession());
             if (cameraControlledStart) beginCameraTimedSession();
             else beginOrResumeSession();
+            const restoreSession = continuingSession && inclineRange ? getElevationSession() : null;
+            inclineRestorePending = !!restoreSession && inclineUtils.resumeInclineTarget(restoreSession, inclineRange) !== null;
     
             const initialSpeed = 1.0;
             const value = Math.round(initialSpeed * 100);
@@ -2426,6 +2451,8 @@
                     const targetValue = Math.round(targetKph * 100);
                     await writeTargetSpeedCommand(targetValue);
                     log(`Target speed confirmed at ${targetKph.toFixed(1)} km/h`);
+                    // The belt is moving now; some treadmills (X14) ignore incline while stopped.
+                    if (restoreSession) await restoreSessionIncline(restoreSession);
                 } catch (e) {
                     console.error('Error setting target speed after delay:', e);
                     treadmillRunning = false;
@@ -2469,6 +2496,7 @@
       }
 
       async function stop({ showSessionActions = false, reason = 'manual' } = {}) {
+        inclineRestorePending = false;
         rampUpGeneration += 1;
         clearTimeout(rampUpTimeout); // Clear the ramp-up timeout
         rampUpTimeout = null;
