@@ -80,3 +80,11 @@ export function sessionElevationGain(session) {
   const value = session?.elevationGainMeters;
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
+
+// Incline to restore when a session is continued, or null when nothing should be sent.
+export function resumeInclineTarget(session, range) {
+  if (!session || !range) return null;
+  const stored = session.lastInclinePercent;
+  if (stored === null || stored === undefined || !Number.isFinite(stored)) return null;
+  return clampIncline(stored, range);
+}

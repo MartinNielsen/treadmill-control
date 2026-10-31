@@ -1,4 +1,4 @@
-const CACHE_NAME = 'treadmill-control-shell-v5';
+const CACHE_NAME = 'treadmill-control-shell-v6';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
